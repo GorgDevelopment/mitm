@@ -215,25 +215,28 @@
         <a href="#" onclick="showSection('home')">Home</a>
         <a href="#" onclick="showSection('payloads')">Payloads</a>
         <a href="#" onclick="showSection('cookies')">Cookies</a>
+        <a href="#" onclick="showSection('cookies')">About</a>
+        <a href="#" onclick="showSection('cookies')">Server</a>
+    </div>
+
+    <div id ="server" class="main-content">
+        <h2>Server information</h2>
+        <div class="server-secret">
+            <span>Server Secret: <code id="current-path"></code></span>
+            <button onclick="copyPath()" class="copy-button">Copy</button>
+        </div>
     </div>
 
     <div id="home" class="main-content">
-        <h2>Welcome back, anon.</h2>
+        <h2>Welcome back</h2>
         <div class="warning">
             <h3>This version is not ready for production!</h3>
-            <p>Current version < 0.2 ></p>
+            <p>Current version: v0.2</p>
         </div>
 
         <h3>Changelog</h3>
         <div class="changelog">
-            <div class="changelog-entry">Added running script using command arguments functionality</div>
-            <div class="changelog-entry">Added default cookie logger</div>
-            <div class="changelog-entry">Design Changes, Bug Fixes and Security Improvements</div>
-        </div>
-
-        <div class="server-secret">
-            <span>Server Secret: <code id="current-path"></code></span>
-            <button onclick="copyPath()" class="copy-button">Copy</button>
+            <div class="changelog-entry">Source Code improvements</div>
         </div>
     </div>
 
