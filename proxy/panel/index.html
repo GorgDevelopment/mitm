@@ -780,16 +780,18 @@
     </div>
 
     <div id="discord-settings" class="main-content">
-        <h2>Discord Integration</h2>
+        <h2>Discord Integration Settings</h2>
         <div class="settings-form">
             <div class="form-group">
-                <label>Webhook URL:</label>
-                <input type="text" id="discord-webhook" class="settings-input" placeholder="https://discord.com/api/webhooks/...">
-                <button onclick="saveDiscordSettings()" class="action-button">Save</button>
+                <label for="discord-webhook">Discord Webhook URL:</label>
+                <input type="text" id="discord-webhook" class="settings-input" placeholder="Enter webhook URL">
             </div>
-            <div class="webhook-test">
-                <button onclick="testDiscordWebhook()" class="action-button">Test Webhook</button>
+            <div class="form-group">
+                <label for="discord-token">Discord Bot Token:</label>
+                <input type="text" id="discord-token" class="settings-input" placeholder="Enter bot token">
             </div>
+            <button onclick="saveDiscordSettings()" class="action-button">Save Settings</button>
+            <button onclick="testDiscordSettings()" class="action-button">Test Connection</button>
         </div>
     </div>
 </div>
@@ -1291,26 +1293,35 @@
     // Discord Settings Management
     function saveDiscordSettings() {
         const webhook = document.getElementById('discord-webhook').value;
+        const token = document.getElementById('discord-token').value;
+        
         fetch('/ep/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ discord_webhook: webhook })
+            body: JSON.stringify({
+                discord_webhook: webhook,
+                discord_token: token
+            })
         })
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                alert('Discord webhook saved successfully!');
+                alert('Discord settings saved successfully!');
+            } else {
+                alert('Error saving settings: ' + data.message);
             }
         });
     }
 
-    function testDiscordWebhook() {
+    function testDiscordSettings() {
         fetch('/ep/api/test_discord', { method: 'POST' })
             .then(response => response.json())
             .then(data => {
-                alert(data.status === 'success' ? 
-                    'Test message sent successfully!' : 
-                    'Failed to send test message. Check your webhook URL.');
+                if (data.status === 'success') {
+                    alert('Discord connection test successful! Check your server for test message.');
+                } else {
+                    alert('Discord connection test failed: ' + data.message);
+                }
             });
     }
 

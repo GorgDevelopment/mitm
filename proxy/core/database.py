@@ -143,3 +143,30 @@ class Database:
             'geolocation': self.get_geolocation()
         }
         return data
+
+    def save_discord_settings(self, webhook_url, bot_token):
+        with sqlite3.connect(self.db_path) as conn:
+            c = conn.cursor()
+            # Create settings table if it doesn't exist
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            
+            # Save settings
+            c.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+                     ('discord_webhook', webhook_url))
+            c.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+                     ('discord_token', bot_token))
+
+    def get_discord_settings(self):
+        with sqlite3.connect(self.db_path) as conn:
+            c = conn.cursor()
+            c.execute('SELECT key, value FROM settings WHERE key IN ("discord_webhook", "discord_token")')
+            settings = dict(c.fetchall())
+            return {
+                'discord_webhook': settings.get('discord_webhook', ''),
+                'discord_token': settings.get('discord_token', '')
+            }

