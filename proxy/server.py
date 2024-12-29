@@ -73,58 +73,52 @@ def start_proxy(target, host, port, secret):
 
             print(f"{Fore.CYAN}[*] Proxying request to: {target_url}{Fore.RESET}")
 
-            # Special handling for Google's consent endpoints
-            if 'consent.google.com' in target_url or 'gen_204' in path:
-                headers = dict(request.headers)
-                excluded_headers = ['host', 'content-length']
-                headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
-                headers['Host'] = target
-                
-                resp = session.request(
-                    method=request.method,
-                    url=target_url,
-                    headers=headers,
-                    data=request.get_data(),
-                    cookies=request.cookies,
-                    allow_redirects=False,
-                    verify=False
-                )
-                
-                # Forward the response as-is
-                response = Response(
-                    resp.content,
-                    resp.status_code,
-                    [(k, v) for k, v in resp.headers.items() 
-                     if k.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']]
-                )
-                
-                # Copy cookies
-                for cookie in resp.cookies:
-                    response.set_cookie(
-                        key=cookie.name,
-                        value=cookie.value,
-                        domain=request.host,
-                        path='/'
-                    )
-                
-                return response
-
-            # Regular request handling
+            # Prepare headers
             headers = dict(request.headers)
             excluded_headers = ['host', 'content-length']
             headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
             headers['Host'] = target
+
+            # Handle POST data
+            data = None
+            if request.method == 'POST':
+                if request.is_json:
+                    data = request.get_json()
+                elif request.form:
+                    data = request.form.to_dict()
+                else:
+                    data = request.get_data()
+
+                # Special handling for consent form
+                if 'consent.google.com' in target_url or 'gen_204' in path:
+                    headers['Content-Type'] = request.headers.get('Content-Type', 'application/x-www-form-urlencoded')
+                    if isinstance(data, dict):
+                        import urllib.parse
+                        data = urllib.parse.urlencode(data)
 
             # Forward the request
             resp = session.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
-                data=request.get_data(),
+                data=data,
                 cookies=request.cookies,
-                allow_redirects=True,
-                verify=False
+                allow_redirects=False,
+                verify=False,
+                timeout=10
             )
+
+            # Handle redirects manually
+            if resp.status_code in [301, 302, 303, 307, 308]:
+                location = resp.headers.get('Location', '')
+                if location.startswith('http'):
+                    location = '/' + location.split('/', 3)[-1]
+                return Response('', resp.status_code, {'Location': location})
+
+            # Special handling for 204 responses
+            if resp.status_code == 204:
+                return Response('', 204, [(k, v) for k, v in resp.headers.items() 
+                                        if k.lower() not in ['content-encoding', 'content-length']])
 
             # Process response
             content = resp.content
@@ -154,7 +148,10 @@ def start_proxy(target, host, port, secret):
                     key=cookie.name,
                     value=cookie.value,
                     domain=request.host,
-                    path='/'
+                    path='/',
+                    secure=cookie.secure,
+                    httponly=cookie.has_nonstandard_attr('HttpOnly'),
+                    samesite='Lax'
                 )
 
             return response
