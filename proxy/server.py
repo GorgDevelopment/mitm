@@ -88,6 +88,9 @@ def start_proxy(target, host, port, secret):
         print(f"[*] Proxying to: {target_url}")
 
         try:
+            # Set reasonable timeouts
+            timeout = (5, 15)  # (connect timeout, read timeout)
+            
             # Preserve original headers and add necessary ones
             headers = {
                 key: value for key, value in request.headers if key.lower() not in [
@@ -107,7 +110,7 @@ def start_proxy(target, host, port, secret):
                 cookies=request.cookies,
                 allow_redirects=True,
                 verify=False,
-                stream=True
+                timeout=timeout
             )
 
             # Process response headers
@@ -157,18 +160,31 @@ def start_proxy(target, host, port, secret):
                         response_headers
                     )
                 except UnicodeDecodeError:
-                    pass
+                    # If we can't decode the content, return it as-is
+                    return Response(
+                        resp.content,
+                        resp.status_code,
+                        response_headers
+                    )
 
             # Return raw response if not HTML or if processing failed
             return Response(
-                resp.raw.read(),
+                resp.content,
                 resp.status_code,
                 response_headers
             )
 
+        except requests.exceptions.Timeout:
+            print(f"{Fore.RED}[!] Request timed out for: {target_url}{Fore.RESET}")
+            return "Request timed out. Please try again.", 504
+            
+        except requests.exceptions.ConnectionError:
+            print(f"{Fore.RED}[!] Connection error for: {target_url}{Fore.RESET}")
+            return "Failed to connect to the target server.", 502
+            
         except Exception as e:
-            print(f"[!] Proxy Error: {str(e)}")
-            return f"Error: {str(e)}", 500
+            print(f"{Fore.RED}[!] Proxy Error: {str(e)}{Fore.RESET}")
+            return f"An error occurred: {str(e)}", 500
 
     @app.route('/ep/api/cookies', methods=['POST'])
     def handle_cookies():
