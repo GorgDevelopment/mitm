@@ -99,10 +99,6 @@ def start_proxy(target, host, port, secret):
 
         return jsonify(response_data), 200
 
-    @app.route('/ep/api/requests', methods=['GET'])
-    def get_requests():
-        return jsonify(requests_history[-MAX_HISTORY:])
-
     @app.route('/ep/api/serverInfo', methods=['GET'])
     def get_server_info():
         return jsonify({
@@ -110,39 +106,6 @@ def start_proxy(target, host, port, secret):
             'host': host,
             'port': str(port)
         }), 200
-
-    @app.route('/ep/api/export', methods=['GET'])
-    def export_data():
-        data = {
-            'cookies': json.load(open('cookies.json')),
-            'requests': requests_history,
-            'config': {
-                'target': target,
-                'host': host,
-                'port': port
-            }
-        }
-        return jsonify(data)
-
-    @app.route('/ep/api/import', methods=['POST'])
-    def import_data():
-        try:
-            data = request.json
-            with open('cookies.json', 'w') as f:
-                json.dump(data.get('cookies', []), f)
-            
-            global requests_history
-            requests_history = data.get('requests', [])
-            
-            return jsonify({'status': 'success'})
-        except Exception as e:
-            return jsonify({'status': 'error', 'message': str(e)}), 400
-
-    @app.route('/ep/api/forms', methods=['POST'])
-    def log_form():
-        data = request.json
-        socketio.emit('new_form', {'form_data': data})
-        return jsonify({'status': 'success'})
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
@@ -168,19 +131,6 @@ def start_proxy(target, host, port, secret):
                 data=request.form,
                 allow_redirects=False
             )
-
-            request_log = {
-                'timestamp': datetime.now().isoformat(),
-                'method': request.method,
-                'path': path,
-                'status_code': resp.status_code,
-                'ip': request.remote_addr
-            }
-            requests_history.append(request_log)
-            if len(requests_history) > MAX_HISTORY:
-                requests_history.pop(0)
-
-            socketio.emit('new_request', {'request': request_log})
 
             response_headers = {
                 key: value for key, value in resp.headers.items() 
