@@ -73,6 +73,14 @@ def error_handler(func):
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
+    
+    # Enable cross-origin requests
+    @app.after_request
+    def after_request(response):
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
@@ -577,4 +585,4 @@ def start_proxy(target, host, port, secret):
         return jsonify({'status': 'success'}), 200
 
     ssl_context = None  # Remove SSL for now to get basic functionality working
-    app.run(host=host, port=port)
+    app.run(host='0.0.0.0', port=port, threaded=True)
