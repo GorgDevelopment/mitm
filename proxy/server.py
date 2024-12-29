@@ -74,6 +74,14 @@ def start_proxy(target, host, port, secret):
 
         return jsonify(response_data), 200
 
+    @app.route('/ep/api/serverInfo', methods=['GET'])
+    def get_server_info():
+        return jsonify({
+            'target': target,
+            'host': host,
+            'port': str(port)
+        }), 200
+
     # Main:
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
