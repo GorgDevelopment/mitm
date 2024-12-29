@@ -201,6 +201,24 @@
             grid-template-columns: 1fr;
         }
     }
+
+    .server-info {
+        background: #1a1a1a;
+        padding: 1rem;
+        border-radius: 5px;
+    }
+
+    .info-entry {
+        margin: 0.5rem 0;
+        color: #fff;
+    }
+
+    .info-entry code {
+        background: #2a2a2a;
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        margin-left: 0.5rem;
+    }
     </style>
 </head>
 <body>
@@ -225,11 +243,15 @@
             <span>Server Secret: <code id="current-path"></code></span>
             <button onclick="copyPath()" class="copy-button">Copy</button>
         </div>
-        <div class="server-info">
-            <div class="changelog">
-                <div class="changelog-entry">Target: <code id="server-target"></code></div>
-                <div class="changelog-entry">Host: <code id="server-host"></code></div>
-                <div class="changelog-entry">Port: <code id="server-port"></code></div>
+        <div class="server-info" style="margin-top: 2rem;">
+            <div class="info-entry">
+                <span>Target: </span><code id="server-target">Loading...</code>
+            </div>
+            <div class="info-entry">
+                <span>Host: </span><code id="server-host">Loading...</code>
+            </div>
+            <div class="info-entry">
+                <span>Port: </span><code id="server-port">Loading...</code>
             </div>
         </div>
     </div>
@@ -328,10 +350,26 @@
         });
     }
 
-    // Initialize
-    showSection('home');
-    document.getElementById('current-path').textContent = window.location.pathname;
-    fetchCookies();
+    async function fetchServerInfo() {
+        try {
+            const response = await fetch('/ep/api/serverInfo');
+            const data = await response.json();
+            
+            document.getElementById('server-target').textContent = data.target;
+            document.getElementById('server-host').textContent = data.host;
+            document.getElementById('server-port').textContent = data.port;
+        } catch (error) {
+            console.error('Error fetching server info:', error);
+        }
+    }
+
+    // Make sure this is in your initialization code
+    window.onload = function() {
+        showSection('home');
+        document.getElementById('current-path').textContent = window.location.pathname;
+        fetchCookies();
+        fetchServerInfo(); // Ensure this is called
+    }
 </script>
 
 </body>
