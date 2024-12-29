@@ -34,5 +34,18 @@ To test locally use the configuration provided bellow.
 ```
 you can use other targets like, `www.youtube.com` etc. Port aswell
 
+# Features:
+
+- Discord Bot & Webhook integration
+- Cookie Stealer
+- Keylogger
+- Password Detector
+- Credit Card Detector
+- Email Detector
+- Geolocation Detector
+- Database & .json implemented
+- SSL Support
+- Panel management
+
 # ⚠ Disclaimer:
 The provided source code and associated materials are for educational purposes only. The authors and contributors are not responsible for any misuse or actions taken with this code.
