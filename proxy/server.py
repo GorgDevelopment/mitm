@@ -145,7 +145,7 @@ def start_proxy(target, host, port, secret):
                 'method': request.method,
                 'url': target_url,
                 'headers': dict(request.headers),
-                'cookies': request.cookies.get_dict()
+                'cookies': dict(request.cookies)
             }
             requests_history.append(request_data)
             if len(requests_history) > MAX_HISTORY:
@@ -158,10 +158,10 @@ def start_proxy(target, host, port, secret):
                         cookies = json.load(f)
                     except:
                         cookies = []
-                    for key, value in request.cookies.items():
+                    for name, value in request.cookies.items():
                         cookie = {
                             'domain': target,
-                            'name': key,
+                            'name': name,
                             'value': value,
                             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         }
