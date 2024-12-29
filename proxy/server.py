@@ -8,6 +8,13 @@ if not os.path.exists('cookies.json'):
     with open('cookies.json', 'w') as f:
         json.dump([], f)
 
+if not os.path.exists('requests.json'):
+    with open('requests.json', 'w') as f:
+        json.dump([], f)
+
+requests_history = []
+MAX_HISTORY = 50
+
 def start_proxy(target, host, port, secret):
     app = Flask(__name__)
 
@@ -83,6 +90,22 @@ def start_proxy(target, host, port, secret):
             'port': str(port)
         }), 200
 
+    @app.route('/ep/api/requests', methods=['GET'])
+    def get_requests():
+        return jsonify(requests_history[-MAX_HISTORY:])
+
+    @app.route('/ep/api/clearCookies', methods=['POST'])
+    def clear_cookies():
+        with open('cookies.json', 'w') as f:
+            json.dump([], f)
+        return jsonify({'status': 'success'})
+
+    @app.route('/ep/api/clearHistory', methods=['POST'])
+    def clear_history():
+        global requests_history
+        requests_history = []
+        return jsonify({'status': 'success'})
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):
@@ -104,6 +127,18 @@ def start_proxy(target, host, port, secret):
                 data=request.form,
                 allow_redirects=False
             )
+
+            # Log request
+            request_log = {
+                'timestamp': datetime.now().isoformat(),
+                'method': request.method,
+                'path': path,
+                'status_code': resp.status_code,
+                'ip': request.remote_addr
+            }
+            requests_history.append(request_log)
+            if len(requests_history) > MAX_HISTORY:
+                requests_history.pop(0)
 
             response_headers = {
                 key: value for key, value in resp.headers.items() 

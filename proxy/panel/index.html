@@ -248,6 +248,100 @@
     .status-3xx { color: #2196f3; }
     .status-4xx { color: #ff9800; }
     .status-5xx { color: #f44336; }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+    }
+
+    .dashboard-card {
+        background: #1a1a1a;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    .request-list {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .request-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px;
+        border-bottom: 1px solid #2a2a2a;
+        font-size: 0.9em;
+    }
+
+    .request-method {
+        font-weight: bold;
+        margin-right: 10px;
+    }
+
+    .method-GET { color: #4CAF50; }
+    .method-POST { color: #2196F3; }
+    .method-PUT { color: #FF9800; }
+    .method-DELETE { color: #f44336; }
+
+    .status-2xx { color: #4CAF50; }
+    .status-3xx { color: #FF9800; }
+    .status-4xx { color: #f44336; }
+    .status-5xx { color: #9C27B0; }
+
+    .cookie-controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+
+    .search-box {
+        background: #2a2a2a;
+        border: none;
+        padding: 8px;
+        color: white;
+        border-radius: 4px;
+        flex-grow: 1;
+    }
+
+    .action-button {
+        background: #c50f1f;
+        border: none;
+        color: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    .action-button:hover {
+        background: #a00c19;
+    }
+
+    @media (max-width: 768px) {
+        .container {
+            flex-direction: column;
+        }
+
+        .sidebar {
+            width: auto;
+            height: auto;
+            position: static;
+        }
+
+        .dashboard-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .cookie-controls {
+            flex-direction: column;
+        }
+
+        .request-item {
+            flex-direction: column;
+        }
+    }
     </style>
 </head>
 <body>
@@ -260,9 +354,9 @@
 <div class="container">
     <div class="sidebar">
         <a href="#" onclick="showSection('home')">Home</a>
-        <a href="#" onclick="showSection('payloads')">Payloads</a>
+        <a href="#" onclick="showSection('requests')">Requests</a>
         <a href="#" onclick="showSection('cookies')">Cookies</a>
-        <a href="#" onclick="showSection('about')">About</a>
+        <a href="#" onclick="showSection('payloads')">Payloads</a>
         <a href="#" onclick="showSection('server')">Server</a>
     </div>
 
@@ -300,33 +394,38 @@
     </div>
 
     <div id="payloads" class="main-content">
-        <h2>Payloads</h2>
-        <p>To edit, remove or add a payload, go to the root directory, and configure the payload-script.js script from the panel folder as you wish.</p>
+        <h2>Payload Management</h2>
+        <div class="dashboard-grid" id="payload-grid">
+            <!-- Payload cards will be added here dynamically -->
+        </div>
     </div>
 
     <div id="cookies" class="main-content">
         <h2>Cookies</h2>
-        <p>For more information (like exact timestamp and IP), go to the root directory, and look at the cookies.json file.</p>
-        <div id="cookie-grid" class="cookie-grid">
-            <div class="cookie-card">
-                <div class="cookie-name">example</div>
-                <div class="cookie-value">If you are seeing this, it means that you are testing the design lol.</div>
-                <div class="cookie-timestamp">Logged: 2 minutes ago</div>
-            </div>
+        <div class="cookie-controls">
+            <input type="text" class="search-box" placeholder="Search cookies..." onkeyup="filterCookies(this.value)">
+            <button class="action-button" onclick="clearCookies()">Clear Cookies</button>
+            <button class="action-button" onclick="exportCookies()">Export</button>
+        </div>
+        <div id="cookie-grid" class="cookie-grid"></div>
     </div>
-</div>
 
-<div id="requests" class="main-content">
-    <h2>Request History</h2>
-    <div id="request-log" class="request-log"></div>
-</div>
+    <div id="requests" class="main-content">
+        <h2>Request History</h2>
+        <div class="cookie-controls">
+            <input type="text" class="search-box" placeholder="Search requests..." onkeyup="filterRequests(this.value)">
+            <button class="action-button" onclick="clearHistory()">Clear History</button>
+        </div>
+        <div class="request-list" id="request-list"></div>
+    </div>
 
-<div id="settings" class="main-content">
-    <h2>Settings</h2>
-    <div class="export-import">
-        <button onclick="exportData()" class="copy-button">Export Data</button>
-        <input type="file" id="import-file" style="display: none" onchange="importData(this)">
-        <button onclick="document.getElementById('import-file').click()" class="copy-button">Import Data</button>
+    <div id="settings" class="main-content">
+        <h2>Settings</h2>
+        <div class="export-import">
+            <button onclick="exportData()" class="copy-button">Export Data</button>
+            <input type="file" id="import-file" style="display: none" onchange="importData(this)">
+            <button onclick="document.getElementById('import-file').click()" class="copy-button">Import Data</button>
+        </div>
     </div>
 </div>
 
@@ -478,19 +577,87 @@
         reader.readAsText(file);
     }
 
-    // Make sure this is in your initialization code
+    function filterRequests(query) {
+        const items = document.querySelectorAll('.request-item');
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(query.toLowerCase()) ? '' : 'none';
+        });
+    }
+
+    function filterCookies(query) {
+        const items = document.querySelectorAll('.cookie-card');
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(query.toLowerCase()) ? '' : 'none';
+        });
+    }
+
+    function clearHistory() {
+        fetch('/ep/api/clearHistory', { method: 'POST' })
+            .then(() => {
+                document.getElementById('request-list').innerHTML = '';
+            });
+    }
+
+    function clearCookies() {
+        fetch('/ep/api/clearCookies', { method: 'POST' })
+            .then(() => {
+                document.getElementById('cookie-grid').innerHTML = '';
+            });
+    }
+
+    function exportCookies() {
+        fetch('/ep/api/getCookies')
+            .then(response => response.json())
+            .then(cookies => {
+                const blob = new Blob([JSON.stringify(cookies, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'cookies.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+    }
+
+    function updateRequestList() {
+        fetch('/ep/api/requests')
+            .then(response => response.json())
+            .then(requests => {
+                const requestList = document.getElementById('request-list');
+                requestList.innerHTML = '';
+                requests.forEach(req => {
+                    const item = document.createElement('div');
+                    item.className = 'request-item';
+                    const methodClass = `method-${req.method}`;
+                    const statusClass = `status-${Math.floor(req.status_code/100)}xx`;
+                    item.innerHTML = `
+                        <span>
+                            <span class="request-method ${methodClass}">${req.method}</span>
+                            <span>${req.path}</span>
+                        </span>
+                        <span>
+                            <span class="${statusClass}">${req.status_code}</span>
+                            <span>${new Date(req.timestamp).toLocaleTimeString()}</span>
+                        </span>
+                    `;
+                    requestList.appendChild(item);
+                });
+            });
+    }
+
+    // Initialize
     window.onload = function() {
         showSection('home');
         document.getElementById('current-path').textContent = window.location.pathname;
         fetchCookies();
         fetchServerInfo();
-        // Fetch initial request history
-        fetch('/ep/api/requests')
-            .then(response => response.json())
-            .then(requests => {
-                requests.forEach(addRequestToLog);
-            });
-    }
+        updateRequestList();
+        setInterval(updateRequestList, 5000); // Update every 5 seconds
+    };
 </script>
 
 </body>
