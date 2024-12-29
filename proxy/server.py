@@ -5,11 +5,25 @@ import brotli
 from core.database import Database
 from core.detection import DataDetector
 from core.discord_bot import DiscordBot
+from colorama import Fore
 
 # Initialize components
 db = Database()
 detector = DataDetector()
-discord_bot = None  # Will be initialized when webhook is set
+discord_bot = None
+
+def initialize_discord_bot():
+    global discord_bot
+    settings = db.get_discord_settings()
+    if settings['discord_webhook'] and settings['discord_token']:
+        try:
+            discord_bot = DiscordBot(settings['discord_webhook'], settings['discord_token'])
+            print(f"{Fore.GREEN}[+] Discord bot initialized successfully!{Fore.RESET}")
+        except Exception as e:
+            print(f"{Fore.RED}[!] Discord bot initialization failed: {str(e)}{Fore.RESET}")
+
+# Initialize bot if settings exist
+initialize_discord_bot()
 
 # Initialize storage
 def ensure_json_files():
@@ -111,22 +125,27 @@ def start_proxy(target, host, port, secret):
                 # Save to database
                 db.save_discord_settings(webhook, token)
                 
-                # Update discord bot
+                # Stop existing bot if any
+                if discord_bot:
+                    discord_bot.stop()
+                
+                # Initialize new bot
                 if webhook and token:
                     discord_bot = DiscordBot(webhook, token)
-                    
+                    print(f"Discord bot initialized with token: {token[:10]}...")
+                
                 return jsonify({
                     'status': 'success',
-                    'message': 'Settings saved successfully'
+                    'message': 'Settings saved and bot initialized'
                 }), 200
                 
             except Exception as e:
+                print(f"Error initializing Discord bot: {str(e)}")
                 return jsonify({
                     'status': 'error',
                     'message': str(e)
                 }), 500
         else:
-            # Get settings from database
             settings = db.get_discord_settings()
             return jsonify(settings), 200
 
