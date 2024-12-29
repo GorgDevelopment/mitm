@@ -7,6 +7,17 @@ from urllib.parse import urljoin, urlparse
 import re
 from bs4 import BeautifulSoup
 from colorama import Fore
+import urllib3
+import ssl
+
+# Disable SSL warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def create_ssl_context():
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
@@ -80,9 +91,17 @@ def start_proxy(target, host, port, secret):
             # Prepare headers
             headers = {
                 key: value for key, value in request.headers.items()
-                if key.lower() not in ['host', 'content-length', 'content-encoding']
+                if key.lower() not in [
+                    'host', 
+                    'content-length', 
+                    'content-encoding',
+                    'connection',
+                    'origin',
+                    'referer'
+                ]
             }
             headers['Host'] = target
+            headers['User-Agent'] = request.headers.get('User-Agent', 'Mozilla/5.0')
             
             # Forward the request with a shorter timeout
             resp = session.request(
@@ -91,22 +110,10 @@ def start_proxy(target, host, port, secret):
                 headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=False,
-                timeout=(3.05, 10)  # (connect timeout, read timeout)
+                allow_redirects=True,  # Changed to True to handle redirects internally
+                timeout=(3.05, 27),  # Increased read timeout
+                verify=False
             )
-
-            # Handle redirects
-            if resp.status_code in [301, 302, 303, 307, 308]:
-                location = resp.headers.get('Location', '')
-                if location.startswith('http'):
-                    parsed = urlparse(location)
-                    if parsed.netloc == target:
-                        location = parsed.path
-                        if parsed.query:
-                            location += f"?{parsed.query}"
-                elif not location.startswith('/'):
-                    location = f"/{location}"
-                return redirect(location, code=resp.status_code)
 
             # Process response
             content = resp.content
@@ -124,7 +131,14 @@ def start_proxy(target, host, port, secret):
             # Prepare response headers
             response_headers = [
                 (key, value) for key, value in resp.headers.items()
-                if key.lower() not in ['content-length', 'transfer-encoding', 'content-encoding', 'connection']
+                if key.lower() not in [
+                    'content-length', 
+                    'transfer-encoding', 
+                    'content-encoding', 
+                    'connection',
+                    'strict-transport-security',
+                    'content-security-policy'
+                ]
             ]
 
             # Create response
@@ -166,5 +180,6 @@ def start_proxy(target, host, port, secret):
         host='0.0.0.0',
         port=port,
         threaded=True,
-        debug=False
+        debug=False,
+        ssl_context=create_ssl_context()
     )
