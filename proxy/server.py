@@ -106,6 +106,16 @@ def start_proxy(target, host, port, secret):
         requests_history = []
         return jsonify({'status': 'success'})
 
+    @app.route('/ep/api/removeRequest', methods=['POST'])
+    def remove_request():
+        data = request.json
+        timestamp = data.get('timestamp')
+        
+        global requests_history
+        requests_history = [req for req in requests_history if req['timestamp'] != timestamp]
+        
+        return jsonify({'status': 'success'})
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):
