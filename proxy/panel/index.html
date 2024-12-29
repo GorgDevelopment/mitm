@@ -654,7 +654,7 @@
 
 <header>
     <img src="/ep/assets/banner.png">
-    <span style="color: #5c5b5b; font-size: small;">v0.7</span>
+    <span style="color: #5c5b5b; font-size: small;">v1.2</span>
 </header>
 
 <div class="container">
@@ -692,7 +692,7 @@
         <h2>Welcome back</h2>
         <div class="warning">
             <h3>This version is not ready for production!</h3>
-            <p>Current version: v0.7</p>
+            <p>Current version: v1.2</p>
         </div>
 
         <h3>Changelog</h3>
@@ -1439,31 +1439,47 @@
         }
     };
 
-    // Add Chart.js and Leaflet.js for visualizations
-    document.head.innerHTML += `
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-    `;
-
-    // Initialize on load
-    document.addEventListener('DOMContentLoaded', () => {
-        // Load settings
-        fetch('/ep/api/settings')
-            .then(response => response.json())
-            .then(config => {
-                document.getElementById('discord-webhook').value = config.discord_webhook || '';
-            });
-    });
-
-    // Initialize
+    // Unified initialization
     window.onload = function() {
+        // Initialize basic functions
         showSection('home');
         updateServerInfo();
         updateRequests();
         updateCookies();
+        
+        // Set up auto-updates
         setInterval(updateRequests, 5000);
+        
+        // Load settings if elements exist
+        const webhookInput = document.getElementById('discord-webhook');
+        if (webhookInput) {
+            fetch('/ep/api/settings')
+                .then(response => response.json())
+                .then(config => {
+                    webhookInput.value = config.discord_webhook || '';
+                })
+                .catch(error => console.log('Settings load error:', error));
+        }
+        
+        // Initialize charts if they exist
+        if (document.getElementById('home').style.display === 'block') {
+            initDashboard();
+        }
     };
+
+    // Add required external scripts
+    const chartScript = document.createElement('script');
+    chartScript.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+    document.head.appendChild(chartScript);
+
+    const leafletCSS = document.createElement('link');
+    leafletCSS.rel = 'stylesheet';
+    leafletCSS.href = 'https://unpkg.com/leaflet@1.7.1/dist/leaflet.css';
+    document.head.appendChild(leafletCSS);
+
+    const leafletScript = document.createElement('script');
+    leafletScript.src = 'https://unpkg.com/leaflet@1.7.1/dist/leaflet.js';
+    document.head.appendChild(leafletScript);
 </script>
 
 </body>
