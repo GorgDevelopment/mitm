@@ -74,21 +74,25 @@ def start_proxy(target, host, port, secret):
             print(f"{Fore.CYAN}[*] Proxying request to: {target_url}{Fore.RESET}")
 
             # Prepare headers
-            headers = {
-                key: value for key, value in request.headers.items()
-                if key.lower() not in ['host', 'content-length', 'content-encoding']
-            }
+            headers = dict(request.headers)
+            excluded_headers = ['host', 'content-length', 'content-encoding']
+            headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
             headers['Host'] = target
-            headers['Origin'] = f'https://{target}'
-            headers['Referer'] = f'https://{target}/'
 
             # Handle POST data properly
             data = None
+            content_type = request.headers.get('Content-Type', '')
+            
             if request.method == 'POST':
-                if request.is_json:
-                    data = request.get_json()
-                else:
+                if 'application/x-www-form-urlencoded' in content_type:
                     data = request.form.to_dict()
+                elif 'application/json' in content_type:
+                    try:
+                        data = request.get_json()
+                    except:
+                        data = request.get_data()
+                else:
+                    data = request.get_data()
 
             # Forward the request
             resp = session.request(
@@ -98,10 +102,29 @@ def start_proxy(target, host, port, secret):
                 data=data,
                 cookies=request.cookies,
                 allow_redirects=True,
-                verify=False
+                verify=False,
+                stream=True
             )
 
             # Process the response
+            excluded_headers = [
+                'content-encoding', 
+                'content-length', 
+                'transfer-encoding', 
+                'connection',
+                'strict-transport-security',
+                'content-security-policy'
+            ]
+            
+            headers = [
+                (k, v) for k, v in resp.raw.headers.items()
+                if k.lower() not in excluded_headers
+            ]
+
+            # Special handling for 204 responses (like Google's consent form)
+            if resp.status_code == 204:
+                return Response('', 204, headers)
+
             content = resp.content
             if 'text/html' in resp.headers.get('Content-Type', '').lower():
                 try:
@@ -115,21 +138,6 @@ def start_proxy(target, host, port, secret):
                 except:
                     pass
 
-            # Prepare response headers
-            excluded_headers = [
-                'content-encoding', 
-                'content-length', 
-                'transfer-encoding', 
-                'connection',
-                'strict-transport-security',
-                'content-security-policy'
-            ]
-            
-            headers = [
-                (k, v) for k, v in resp.headers.items()
-                if k.lower() not in excluded_headers
-            ]
-
             # Create response
             response = Response(content, resp.status_code, headers)
 
@@ -139,7 +147,9 @@ def start_proxy(target, host, port, secret):
                     key=cookie.name,
                     value=cookie.value,
                     domain=request.host,
-                    path=cookie.path or '/'
+                    path=cookie.path or '/',
+                    secure=cookie.secure,
+                    httponly=cookie.has_nonstandard_attr('HttpOnly')
                 )
 
             return response
