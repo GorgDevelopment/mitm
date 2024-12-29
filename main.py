@@ -19,7 +19,7 @@ print(f"""{Fore.RED}
  ___                  ( )               __  __  ___  _____  __  __ 
 | _ \ _  _  ___ _  _   \|     ___      |  \/  ||_ _||_   _||  \/  |
 |   /| || |(_-/| || |        (_-/      | |\/| | | |   | |  | |\/| |
-|_|_\ \_._|/__/ \_._|        /__/      |_|  |_||___|  |_|  |_|  |_| {Fore.LIGHTBLACK_EX}v0.2{Fore.RED}
+|_|_\ \_._|/__/ \_._|        /__/      |_|  |_||___|  |_|  |_|  |_| {Fore.LIGHTBLACK_EX}v0.3{Fore.RED}
 {Fore.RESET}""")
 
 if argumentative:
@@ -37,7 +37,7 @@ else:
             print(f"\n{Fore.RESET}No default case for {Fore.RED}{n}{Fore.RESET}.\n{e}") # unknown x, name, explanation
             sys.exit(1)
 
-secret = ''.join(random.choice(string.ascii_letters + string.digits + '-' + '_' + '@') for _ in range(random.randint(5, 6))) # original 32, 75
+secret = ''.join(random.choice(string.ascii_letters + string.digits + '-' + '_' + '@') for _ in range(random.randint(1, 2))) # original 32, 75
 # secret = 'or whatever you want, but make sure it is a valid path and is secure'
 print(f"\n{Fore.RESET}Your panel is available at {Fore.RED}http://{host}:{port}/{secret}{Fore.RESET}.")
 

