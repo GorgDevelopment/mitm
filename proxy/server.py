@@ -74,16 +74,13 @@ def error_handler(func):
 def start_proxy(target, host, port, secret):
     app = Flask(__name__, static_folder='panel', static_url_path='')
 
-    # Remove 'www.' if present and any protocol
-    #target = target.replace('www.', '').replace('http://', '').replace('https://', '')
-
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     def proxy(path):
         if path.startswith(secret):
             return send_from_directory('panel', 'index.html')
 
-        # Build target URL
+        # Build target URL (without www handling)
         target_url = f"https://{target}/{path}"
         
         # Forward headers but exclude some
