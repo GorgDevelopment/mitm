@@ -33,3 +33,6 @@ To test locally use the configuration provided bellow.
 [ Port ] --> 3000
 ```
 you can use other targets like, `www.youtube.com` etc. Port aswell
+
+# ⚠ Disclaimer:
+The provided source code and associated materials are for educational purposes only. The authors and contributors are not responsible for any misuse or actions taken with this code.
