@@ -98,15 +98,20 @@ def start_proxy(target, host, port, secret):
         if path.startswith(secret):
             return panel_index()
 
-        target_url = f"https://{target}/{path}"
+        # Handle direct access to proxy
+        if not path and request.host.endswith(f":{port}"):
+            target_url = f"https://{target}"
+        else:
+            target_url = f"https://{target}/{path}"
+        
         print(f"[*] Proxying to: {target_url}")
         
         # Handle OPTIONS requests for CORS
         if request.method == 'OPTIONS':
             return Response('', 200, {
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Methods': '*',
+                'Access-Control-Allow-Headers': '*',
                 'Access-Control-Max-Age': '3600'
             })
 
@@ -117,7 +122,8 @@ def start_proxy(target, host, port, secret):
                 'content-length',
                 'connection',
                 'origin',
-                'referer'
+                'referer',
+                'accept-encoding'  # Remove this to avoid compression issues
             ]
         }
         headers['Host'] = target

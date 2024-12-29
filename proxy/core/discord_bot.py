@@ -26,9 +26,21 @@ class DiscordBot:
         print(f"{Fore.YELLOW}[*] Initializing Discord bot...{Fore.RESET}")
         self.webhook_url = webhook_url
         self.token = token
-        self.bot = ProxyBot(webhook_url)
+        self.bot = None
+        self.running = True
+        
+        # Initialize the bot with intents
+        intents = discord.Intents.default()
+        intents.message_content = True
+        self.bot = commands.Bot(command_prefix='/', intents=intents)
+        
+        # Setup commands
         self.setup_commands()
-        self.start()
+        
+        # Start bot in a separate thread
+        self.bot_thread = threading.Thread(target=self.start)
+        self.bot_thread.daemon = True
+        self.bot_thread.start()
 
     def setup_commands(self):
         @self.bot.event
@@ -232,9 +244,7 @@ class DiscordBot:
     def start(self):
         try:
             print(f"{Fore.YELLOW}[*] Starting Discord bot...{Fore.RESET}")
-            self.bot.run(self.token, log_handler=None)
-        except discord.LoginFailure:
-            print(f"{Fore.RED}[!] Failed to login. Check your token.{Fore.RESET}")
+            asyncio.run(self.bot.start(self.token))
         except Exception as e:
             print(f"{Fore.RED}[!] Bot error: {e}{Fore.RESET}")
 
