@@ -73,58 +73,60 @@ def start_proxy(target, host, port, secret):
 
             print(f"{Fore.CYAN}[*] Proxying request to: {target_url}{Fore.RESET}")
 
-            # Prepare headers
+            # Special handling for Google's consent endpoints
+            if 'consent.google.com' in target_url or 'gen_204' in path:
+                headers = dict(request.headers)
+                excluded_headers = ['host', 'content-length']
+                headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
+                headers['Host'] = target
+                
+                resp = session.request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    data=request.get_data(),
+                    cookies=request.cookies,
+                    allow_redirects=False,
+                    verify=False
+                )
+                
+                # Forward the response as-is
+                response = Response(
+                    resp.content,
+                    resp.status_code,
+                    [(k, v) for k, v in resp.headers.items() 
+                     if k.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']]
+                )
+                
+                # Copy cookies
+                for cookie in resp.cookies:
+                    response.set_cookie(
+                        key=cookie.name,
+                        value=cookie.value,
+                        domain=request.host,
+                        path='/'
+                    )
+                
+                return response
+
+            # Regular request handling
             headers = dict(request.headers)
-            excluded_headers = ['host', 'content-length', 'content-encoding']
+            excluded_headers = ['host', 'content-length']
             headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
             headers['Host'] = target
-
-            # Handle POST data properly
-            data = None
-            content_type = request.headers.get('Content-Type', '')
-            
-            if request.method == 'POST':
-                if 'application/x-www-form-urlencoded' in content_type:
-                    data = request.form.to_dict()
-                elif 'application/json' in content_type:
-                    try:
-                        data = request.get_json()
-                    except:
-                        data = request.get_data()
-                else:
-                    data = request.get_data()
 
             # Forward the request
             resp = session.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
-                data=data,
+                data=request.get_data(),
                 cookies=request.cookies,
                 allow_redirects=True,
-                verify=False,
-                stream=True
+                verify=False
             )
 
-            # Process the response
-            excluded_headers = [
-                'content-encoding', 
-                'content-length', 
-                'transfer-encoding', 
-                'connection',
-                'strict-transport-security',
-                'content-security-policy'
-            ]
-            
-            headers = [
-                (k, v) for k, v in resp.raw.headers.items()
-                if k.lower() not in excluded_headers
-            ]
-
-            # Special handling for 204 responses (like Google's consent form)
-            if resp.status_code == 204:
-                return Response('', 204, headers)
-
+            # Process response
             content = resp.content
             if 'text/html' in resp.headers.get('Content-Type', '').lower():
                 try:
@@ -139,7 +141,12 @@ def start_proxy(target, host, port, secret):
                     pass
 
             # Create response
-            response = Response(content, resp.status_code, headers)
+            response = Response(
+                content,
+                resp.status_code,
+                [(k, v) for k, v in resp.headers.items() 
+                 if k.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']]
+            )
 
             # Handle cookies
             for cookie in resp.cookies:
@@ -147,9 +154,7 @@ def start_proxy(target, host, port, secret):
                     key=cookie.name,
                     value=cookie.value,
                     domain=request.host,
-                    path=cookie.path or '/',
-                    secure=cookie.secure,
-                    httponly=cookie.has_nonstandard_attr('HttpOnly')
+                    path='/'
                 )
 
             return response
