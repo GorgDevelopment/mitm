@@ -82,12 +82,20 @@ def start_proxy(target, host, port, secret):
             headers['Origin'] = f'https://{target}'
             headers['Referer'] = f'https://{target}/'
 
+            # Handle POST data properly
+            data = None
+            if request.method == 'POST':
+                if request.is_json:
+                    data = request.get_json()
+                else:
+                    data = request.form.to_dict()
+
             # Forward the request
             resp = session.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
-                data=request.get_data(),
+                data=data,
                 cookies=request.cookies,
                 allow_redirects=True,
                 verify=False
