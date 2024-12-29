@@ -260,5 +260,5 @@ def start_proxy(target, host, port, secret):
         except Exception as e:
             return f"Error: {str(e)}", 500
 
-    ssl_context = ssl_handler.get_cert_paths()
-    app.run(host=host, port=port, ssl_context=ssl_context)
+    ssl_context = None  # Remove SSL for now to get basic functionality working
+    app.run(host=host, port=port)
